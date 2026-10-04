@@ -16,9 +16,9 @@ def fetch_date(env, aoi_bounds, path, date, slc_dir, log):
     """burst2stack for one date; returns True when a SAFE was produced."""
     d0 = datetime.datetime.strptime(date, '%Y%m%d'); d1 = d0 + datetime.timedelta(days=1)
     tmp = os.path.join(os.path.dirname(slc_dir), 'tmp_%s' % date); os.makedirs(tmp, exist_ok=True)
-    W, S, E, N = aoi_bounds
+    ext = aoi_bounds if isinstance(aoi_bounds, str) else '%.4f %.4f %.4f %.4f' % tuple(aoi_bounds)   # geometry file (AOI polygon) or W S E N
     cmd = ('source %s/etc/profile.d/conda.sh && conda activate b2s && cd %s && burst2stack --rel-orbit %d --start-date %s --end-date %s '
-           '--extent %.4f %.4f %.4f %.4f --pols VV --output-dir %s') % (env['BIM_CONDA'], tmp, path, d0.date(), d1.date(), W, S, E, N, tmp)
+           '--extent %s --pols VV --output-dir %s') % (env['BIM_CONDA'], tmp, path, d0.date(), d1.date(), ext, tmp)
     with open(log, 'a') as lf:
         rc = subprocess.run(['bash', '-c', cmd], stdout=lf, stderr=subprocess.STDOUT).returncode
     safes = glob.glob(os.path.join(tmp, 'S1*.SAFE'))

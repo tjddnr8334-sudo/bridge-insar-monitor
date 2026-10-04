@@ -22,7 +22,7 @@ def load(path):
 
 def track_dirs(c, track):
     """Data (large, slow disk) and work (fast disk) directories of one track."""
-    key = '%s%d' % (track['dir'][0].lower(), track['path'])
+    key = '%s%d%s' % (track['dir'][0].lower(), track['path'], track.get('tag', ''))
     data = os.path.join(c['paths']['data'], c['name'], key)
     work = os.path.join(c['paths']['work'], c['name'], key)
     for d in (data, work):

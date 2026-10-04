@@ -35,6 +35,7 @@ def bursts(aoi_wkt, path, date):
 
 
 def available_dates(aoi_wkt, path, start, end=None):
+    if end and len(end) == 8: end = '%s-%s-%s' % (end[:4], end[4:6], end[6:])
     import asf_search as asf
     end = end or datetime.date.today().isoformat()
     r = asf.search(dataset='SLC-BURST', relativeOrbit=path, start=start, end=end, intersectsWith=aoi_wkt, polarization='VV')

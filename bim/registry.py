@@ -63,4 +63,5 @@ def tiles(brs, size_m=1500.0, margin_m=300.0, min_half_m=800.0):
 def aoi_wkt(tl, pad_deg=0.01):
     from shapely.geometry import box
     from shapely.ops import unary_union
-    return unary_union([box(t['W'] - pad_deg, t['S'] - pad_deg, t['E'] + pad_deg, t['N'] + pad_deg) for t in tl]).convex_hull.wkt
+    # union of the tile windows (not the convex hull): only bursts that contain bridges are downloaded
+    return unary_union([box(t['W'] - pad_deg, t['S'] - pad_deg, t['E'] + pad_deg, t['N'] + pad_deg) for t in tl]).simplify(0.005).wkt

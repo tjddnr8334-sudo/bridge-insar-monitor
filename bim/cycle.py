@@ -22,20 +22,31 @@ def prepare(c):
     tl = registry.tiles(brs)
     aoi = registry.aoi_wkt(tl)
     trs = c.get('tracks') or TR.find(aoi, start=c.get('start', '2018-06-01'))
+    for tr in trs:   # per-period reference date (middle acquisition of that period) when not given
+        if not tr.get('reference_date'):
+            ds = TR.available_dates(aoi, tr['path'], tr.get('start', c.get('start', '2018-06-01')), tr.get('end'))
+            tr['reference_date'] = TR.reference(ds) if ds else None; tr['n_dates'] = len(ds)
+    trs = [tr for tr in trs if tr.get('reference_date')]
     json.dump(dict(bridges=len(brs), tiles=len(tl), aoi=aoi, tracks=trs), open(os.path.join(root, 'setup.json'), 'w'), ensure_ascii=False, indent=1)
     return brs, tl, aoi, trs
 
 
-def run_track(c, tr, tl, aoi, log):
+def run_track(c, tr, tl, aoi, log, download_only=False):
     key, data, work = C.track_dirs(c, tr); env = C.env(c, tr)
     json.dump(tl, open(os.path.join(data, 'tiles.json'), 'w'), ensure_ascii=False)
     slc = os.path.join(c['paths']['data'], 'slc', key); orb = c['paths']['orbits']
     from shapely import wkt as W
     b = W.loads(aoi).bounds
     # 1) acquisitions
-    dates = TR.available_dates(aoi, tr['path'], c.get('start', '2018-06-01'))
-    new = download.update(env, b, tr['path'], dates, slc, orb, os.path.join(data, 'download.log'))
-    weather.fetch(tl, tr['utc'], os.path.join(data, 'temps'), start=c.get('start', '2018-06-01'))
+    t0, t1 = tr.get('start', c.get('start', '2018-06-01')), tr.get('end')
+    dates = TR.available_dates(aoi, tr['path'], t0, t1)
+    gj = os.path.join(c['paths']['data'], c['name'], 'aoi.geojson')
+    if not os.path.exists(gj):
+        from shapely.geometry import mapping
+        json.dump(dict(type='FeatureCollection', features=[dict(type='Feature', properties={}, geometry=mapping(W.loads(aoi)))]), open(gj, 'w'))
+    new = download.update(env, gj, tr['path'], dates, slc, orb, os.path.join(data, 'download.log'))
+    weather.fetch(tl, tr['utc'], os.path.join(data, 'temps'), start=t0, end=t1)
+    if download_only: return new
     # |Bperp| > max dates are skipped before coregistration (they are removed by the QC filter anyway)
     # 2) stacks per swath (ISCE selects every burst of that swath overlapping the AOI box)
     for sw in sorted({b_['sw'] for b_ in TR.bursts(aoi, tr['path'], tr['reference_date'])}):
@@ -69,12 +80,13 @@ def run_track(c, tr, tl, aoi, log):
     return new
 
 
-def run(c):
+def run(c, download_only=False):
     from . import collect, alerts, report
     root = os.path.join(c['paths']['data'], c['name']); log = os.path.join(root, 'cycle.log')
     brs, tl, aoi, trs = prepare(c); news = {}
     for tr in trs:
-        news['%s%d' % (tr['dir'][0].lower(), tr['path'])] = run_track(c, tr, tl, aoi, log)
+        news[C.track_dirs(c, tr)[0]] = run_track(c, tr, tl, aoi, log, download_only)
+    if download_only: return dict(new_dates=news)
     res = collect.collect(c, brs, trs)
     al = alerts.make(c, res)
     report.build(c, res, al)

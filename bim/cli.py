@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Command line:  python -m bim <command> --config config/gangneung.yaml
   setup    registry -> bridges, tiles, tracks covering the municipality (no processing)
+  download acquisitions + weather only (all tracks), no processing
   update   one full cycle: new acquisitions -> processing -> judgement -> alerts -> dashboard (safe to run daily; idle if nothing new)
   report   rebuild alerts and dashboard from the existing results
   status   bridges, tracks, last acquisition per track, last cycle summary"""
@@ -10,7 +11,7 @@ from . import config as C
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog='bim')
-    ap.add_argument('command', choices=['setup', 'update', 'report', 'status'])
+    ap.add_argument('command', choices=['setup', 'download', 'update', 'report', 'status'])
     ap.add_argument('--config', required=True)
     a = ap.parse_args(argv)
     c = C.load(a.config)
@@ -18,6 +19,8 @@ def main(argv=None):
     if a.command == 'setup':
         brs, tl, aoi, trs = cycle.prepare(c)
         print(json.dumps(dict(bridges=len(brs), tiles=len(tl), tracks=trs), ensure_ascii=False, indent=1))
+    elif a.command == 'download':
+        print(json.dumps(cycle.run(c, download_only=True), ensure_ascii=False, indent=1))
     elif a.command == 'update':
         print(json.dumps(cycle.run(c), ensure_ascii=False, indent=1))
     elif a.command == 'report':
