@@ -1,0 +1,8 @@
+# orchestration (conda env b2s)
+pyyaml
+pandas
+numpy
+shapely
+asf_search
+burst2safe
+# processing environments (see README): ISCE2 + topsStack + GDAL (isce2_mintpy), h5py/scipy (miaplpy), sentineleof (isce2), StaMPS + Octave

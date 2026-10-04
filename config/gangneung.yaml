@@ -1,0 +1,21 @@
+# Example municipality: 강원특별자치도 강릉시
+name: gangneung                 # directory name under paths.data / paths.work
+title: 강원특별자치도 강릉시
+sido: 강원                       # matched against 시도명 of 전국교량표준데이터
+sigungu: 강릉시                  # one name or a list; omit for the whole province
+min_length_m: 0                 # every bridge in the registry (short bridges are judged as "관측 한계" when they have no scatterer)
+start: '2018-06-01'             # first acquisition used
+boundaries: data/gangwon_muni.geojson
+# tracks: leave empty to detect every Sentinel-1 track over the municipality (relative orbit, direction, pass time, reference date)
+tracks: []
+parallel_tiles: 4
+parallel_second: 2
+paths:                          # WSL / Linux paths
+  data: /mnt/e/InSAR_DATA/bim   # SLC bursts, tile windows, results, history (large, slow disk is fine)
+  work: /home/insar/bim         # stacks and StaMPS runs (fast disk)
+  conda: /home/insar/miniforge3 # envs: isce2_mintpy (ISCE2 + topsStack), miaplpy (MintPy, h5py), b2s (burst2safe), isce2 (sentineleof)
+  stamps: /home/insar/StaMPS
+  dem: /home/insar/gw/DEM/dem.wgs84            # Copernicus GLO-30, ellipsoidal heights (sardem --data-source COP -isce)
+  orbits: /mnt/e/InSAR_DATA/bim/orbits
+  aux: /home/insar/insar_processing_naegok/aux # S1 auxiliary calibration files for topsStack
+criteria: {}                    # overrides of config/criteria.yaml for this municipality

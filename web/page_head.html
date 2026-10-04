@@ -1,0 +1,59 @@
+<title>강원도 교량 변위 지도</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+:root{
+  --bg:#f3f5f7; --panel:#ffffff; --ink:#18232f; --muted:#5d6b78; --line:#d6dde4; --land:#e4e9ee; --land-hi:#cfd8e1;
+  --accent:#1f4e79; --ok:#2e8b57; --watch:#b9a400; --warn:#d18a00; --bad:#c8372d; --none:#b6c0ca; --sel:#0f2f4d;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#10161d; --panel:#18212b; --ink:#e6ecf2; --muted:#9aa8b6; --line:#2c3a48; --land:#243140; --land-hi:#2f4152;
+  --accent:#6aa5d8; --ok:#4fb67d; --watch:#d6c43a; --warn:#e7a52b; --bad:#ec6157; --none:#4a5868; --sel:#bcd9f2; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#10161d; --panel:#18212b; --ink:#e6ecf2; --muted:#9aa8b6; --line:#2c3a48; --land:#243140; --land-hi:#2f4152;
+  --accent:#6aa5d8; --ok:#4fb67d; --watch:#d6c43a; --warn:#e7a52b; --bad:#ec6157; --none:#4a5868; --sel:#bcd9f2; color-scheme:dark;}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:"Noto Sans KR",system-ui,sans-serif;font-size:14px;padding-inline:16px;padding-block:14px}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;margin-bottom:12px}
+h1{font-size:18px;margin:0;font-weight:700;text-wrap:balance}
+.crumb{display:flex;gap:6px;align-items:center;color:var(--muted);flex-wrap:wrap}
+.crumb button{background:none;border:0;color:var(--accent);font:inherit;cursor:pointer;padding:2px 4px;border-radius:4px}
+.crumb button:disabled{color:var(--ink);cursor:default;font-weight:700}
+.crumb button:focus-visible,.btn:focus-visible,.item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin-left:auto;align-items:center;color:var(--muted);font-size:12px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+.th{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+.th input{width:56px;font:inherit;padding:3px 5px;border:1px solid var(--line);border-radius:4px;background:var(--panel);color:var(--ink)}
+main{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:14px}
+@media (max-width:860px){main{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}
+#map{width:100%;height:auto;display:block}
+.muni{fill:var(--land);stroke:var(--panel);stroke-width:1;cursor:pointer;transition:fill .15s}
+.muni:hover{fill:var(--land-hi)}
+.muni.dim{opacity:.35}
+.muni.sel{fill:var(--land-hi);stroke:var(--accent);stroke-width:1.6}
+.mlabel{font-size:11px;fill:var(--muted);pointer-events:none;text-anchor:middle}
+.bmark{cursor:pointer;stroke:var(--panel);stroke-width:2}
+.blabel{font-size:12px;font-weight:700;fill:var(--ink);pointer-events:none;paint-order:stroke;stroke:var(--panel);stroke-width:3px}
+h2{font-size:15px;margin:0 0 8px}
+.sub{color:var(--muted);font-size:12px}
+.list{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.item{display:grid;grid-template-columns:14px 1fr auto;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);cursor:pointer;text-align:left;font:inherit;color:inherit}
+.item:hover{border-color:var(--accent)}
+.pill{font-size:11px;padding:2px 8px;border-radius:10px;color:#fff;font-weight:500;white-space:nowrap}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin:10px 0}
+.kv div{border:1px solid var(--line);border-radius:6px;padding:7px 9px}
+.kv b{display:block;font-size:16px}
+.kv span{font-size:11px;color:var(--muted)}
+.alert{border-left:0;background:color-mix(in srgb,var(--bad) 12%,var(--panel));border:1px solid color-mix(in srgb,var(--bad) 45%,var(--line));border-radius:6px;padding:8px 10px;margin:8px 0;font-size:13px}
+.okmsg{background:color-mix(in srgb,var(--ok) 10%,var(--panel));border:1px solid color-mix(in srgb,var(--ok) 40%,var(--line));border-radius:6px;padding:8px 10px;margin:8px 0;font-size:13px}
+svg text{fill:var(--muted)}
+.axis path,.axis line{stroke:var(--line)}
+.axis text{font-size:10px;fill:var(--muted);font-family:"IBM Plex Mono",monospace}
+.note{font-size:12px;color:var(--muted);margin-top:6px}
+.chartbox{overflow-x:auto}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>

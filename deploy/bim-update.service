@@ -1,0 +1,7 @@
+[Unit]
+Description=bridge-insar-monitor update cycle
+
+[Service]
+Type=oneshot
+User=insar
+ExecStart=/bin/bash /opt/bridge-insar-monitor/deploy/run_update.sh /opt/bridge-insar-monitor/config/gangneung.yaml

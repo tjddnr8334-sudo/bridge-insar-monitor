@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily bridge-insar-monitor update (Sentinel-1 revisit 12 days, publication ~1 day)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

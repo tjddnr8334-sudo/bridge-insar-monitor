@@ -1,0 +1,260 @@
+<header>
+  <h1>강원도 교량 변위 지도</h1>
+  <nav class="crumb" aria-label="위치">
+    <button id="c0" type="button">강원도</button><span id="s1" hidden>›</span>
+    <button id="c1" type="button" hidden></button><span id="s2" hidden>›</span>
+    <button id="c2" type="button" hidden disabled></button>
+  </nav>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--ok)"></i>정상</span>
+    <span><i class="dot" style="background:var(--watch)"></i>관심</span>
+    <span><i class="dot" style="background:var(--warn)"></i>주의</span>
+    <span><i class="dot" style="background:var(--bad)"></i>경고</span>
+    <span><i class="dot" style="background:var(--none)"></i>분석 교량 없음</span>
+    <span><i class="dot" style="background:transparent;border:1.5px solid var(--muted);width:7px;height:7px"></i>OSM 교량 (미분석)</span>
+  </div>
+</header>
+<main>
+  <section class="card"><svg id="map" viewBox="0 0 640 520" role="img" aria-label="강원도 시군 지도"></svg>
+    <details id="thr" style="margin-top:8px"><summary class="sub" style="cursor:pointer">위험도 판정 기준 (허용변위 대비 비율, 시설물 종별 · 수정 가능)</summary><div class="chartbox" id="rthtab"></div><p class="note">InSAR는 첫 촬영일부터의 상대 변위만 측정합니다. 교량 주변 지반(30~300 m) 대비 누적 수직변위를 허용 총침하 50 mm와, 인접 지점 간 부등변위를 허용 각변위(연속·강결 형식 0.004, 단순 형식 0.008 × 경간)와 비교합니다. 비율이 종별 기준을 넘으면 등급을 올리고, 현재 속도로 10년 뒤 예측값은 한 단계까지만 반영합니다. 주변 지반 변동의 2배를 넘지 않는 변위는 오차 범위로 보고 0으로 둡니다.</p><details style="margin-top:6px"><summary class="sub" style="cursor:pointer">정밀 분석 교량용 InSAR 지표 4종 (내곡교 등)</summary><div class="chartbox" id="thrtab"></div></details>
+    <p class="note">각 지표를 관심·주의·경고 기준과 비교하고, 가장 높은 등급을 교량 위험도로 정합니다. 자료 신뢰도가 낮으면 "신뢰도 낮음"을 함께 표시합니다.</p></details></section>
+  <section class="card" id="panel"></section>
+</main>
+<script src="data.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+const W=640,H=520, svg=d3.select('#map');
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+let state={city:null,bridge:null,node:null,osm:null};
+const STATUS={ok:['정상','--ok'],watch:['관심','--watch'],warn:['주의','--warn'],bad:['경고','--bad'],none:['분석 교량 없음','--none']};
+const LV=['ok','watch','warn','bad'];
+const IND=[
+ {k:'V',   name:'수직 변위속도',        unit:'mm/yr', th:[1,2,4], why:'지속적인 침하·융기'},
+ {k:'ACC', name:'변위속도 증가 (최근 2년 − 이전)', unit:'mm/yr', th:[1,2,3], why:'거동이 빨라지는 가속'},
+ {k:'DIFF',name:'인접 지점 간 변위속도 차', unit:'mm/yr', th:[1,2,3], why:'부등침하 (교각·교대 사이)'},
+ {k:'CUM', name:'누적 변위',            unit:'mm',    th:[10,20,30], why:'관측기간 전체의 변위량'}];
+const D0=new Date(2022,2,25), DT=DATA.dates.map(d=>new Date(+d.slice(0,4),+d.slice(4,6)-1,+d.slice(6))), YR=DT.map(d=>(d-D0)/3.15576e10);
+function linfit(x,y){ // least squares: offset + velocity + annual sin/cos -> returns velocity
+  const p=x.map((v,i)=>[v,y[i]]).filter(q=>q[1]!==null&&q[1]!==undefined&&isFinite(q[1])); if(p.length<10) return NaN;
+  const N=[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]], r=[0,0,0,0];
+  p.forEach(([t,v])=>{ const a=[1,t,Math.sin(2*Math.PI*t),Math.cos(2*Math.PI*t)]; for(let i=0;i<4;i++){ r[i]+=a[i]*v; for(let j=0;j<4;j++) N[i][j]+=a[i]*a[j]; } });
+  for(let i=0;i<4;i++){ let m=i; for(let k=i+1;k<4;k++) if(Math.abs(N[k][i])>Math.abs(N[m][i])) m=k; [N[i],N[m]]=[N[m],N[i]]; [r[i],r[m]]=[r[m],r[i]];
+    for(let k=i+1;k<4;k++){ const f=N[k][i]/N[i][i]; for(let j=i;j<4;j++) N[k][j]-=f*N[i][j]; r[k]-=f*r[i]; } }
+  const s=[0,0,0,0]; for(let i=3;i>=0;i--){ let v=r[i]; for(let j=i+1;j<4;j++) v-=N[i][j]*s[j]; s[i]=v/N[i][i]; } return s[1]; }
+function supports(b){ const L=b.len, n=b.ifc?b.ifc.spans:1, sp=L/n; return d3.range(n+1).map(k=>({name:k===0?'교대 A(시점)':k===n?'교대 B(종점)':'교각 P'+k, s:-L/2+k*sp})); }
+const RCACHE={};
+function risk(b){
+  if(RCACHE[b.id]) return RCACHE[b.id];
+  const out={items:{},conf:'보통',confWhy:''};
+  if(b.nodes){
+    const tEnd=YR[YR.length-1], cut=tEnd-2;
+    const sup=supports(b).map(s=>{ const ns=b.nodes.filter(n=>Math.abs(n.s-s.s)<=4.5); const ts=YR.map((_,i)=>d3.mean(ns,n=>n.ts[i]===null?undefined:n.ts[i]));
+      const vAll=linfit(YR,ts), vNew=linfit(YR.filter(y=>y>=cut),ts.filter((_,i)=>YR[i]>=cut)), vOld=linfit(YR.filter(y=>y<cut),ts.filter((_,i)=>YR[i]<cut));
+      return {...s, v:vAll, acc:vNew-vOld}; });
+    const vmax=b.nodes.reduce((a,n)=>Math.abs(n.v)>Math.abs(a.v)?n:a);
+    out.items.V={val:Math.abs(vmax.v), where:`노드 s = ${vmax.s>=0?'+':''}${vmax.s} m (${vmax.v>0?'융기':'침하'} ${vmax.v} mm/yr)`};
+    const am=sup.reduce((a,s)=>Math.abs(s.acc)>Math.abs(a.acc)?s:a); out.items.ACC={val:Math.abs(am.acc), where:`${am.name} (${am.acc>0?'+':''}${am.acc.toFixed(2)} mm/yr)`};
+    let dm={d:0}; for(let k=0;k<sup.length-1;k++){ const d=Math.abs(sup[k].v-sup[k+1].v); if(d>dm.d) dm={d,a:sup[k].name,b:sup[k+1].name}; }
+    out.items.DIFF={val:dm.d, where:`${dm.a} ↔ ${dm.b}`};
+    const span=YR[YR.length-1]-YR[0]; out.items.CUM={val:Math.abs(vmax.v)*span, where:`노드 s = ${vmax.s>=0?'+':''}${vmax.s} m (변위속도 × ${span.toFixed(1)}년)`};
+    const psr=b.nodes.filter(n=>n.src!=='DS').length/b.nodes.length; out.sup=sup;
+    out.conf=psr>=0.5?'높음':psr>=0.3?'보통':'낮음'; out.confWhy=`PS 노드 비율 ${(psr*100).toFixed(0)} %, 나머지 DS 보완`;
+  } else {
+    const v=Math.max(Math.abs(b.vmin),Math.abs(b.vmax));
+    out.items.V={val:v, where:'교량 요약값 (점 위치 미연동)'}; out.items.CUM={val:Math.abs(b.cum), where:'교량 요약값'};
+    out.items.ACC={val:NaN, where:'시계열 미연동'}; out.items.DIFF={val:NaN, where:'점 단위 결과 미연동'};
+    out.conf='낮음'; out.confWhy='요약 수치만 연동 — 4개 지표 중 2개만 평가';
+  }
+  IND.forEach(I=>{ const it=out.items[I.k]; it.lv=isFinite(it.val)?(it.val>=I.th[2]?3:it.val>=I.th[1]?2:it.val>=I.th[0]?1:0):-1; });
+  out.level=Math.max(...IND.map(I=>out.items[I.k].lv)); out.st=LV[Math.max(0,out.level)];
+  out.top=IND.filter(I=>out.items[I.k].lv===out.level&&out.level>0);
+  return RCACHE[b.id]=out;
+}
+function bStatus(b){ return risk(b).st; }
+function maxAbs(b){ return risk(b).items.V.val; }
+function cityStatus(name){ const bs=DATA.bridges.filter(b=>b.city===name); const gs=DATA.osm.filter(o=>o.c===name&&o.r&&o.r.lv>=0);
+  if(!bs.length&&!gs.length) return 'none';
+  return LV[Math.max(...bs.map(b=>risk(b).level),...gs.map(gwLevel),0)]; }
+const RTH={'1종':[0.3,0.5,0.7],'2종':[0.4,0.6,0.8],'3종':[0.5,0.7,0.9],'기타':[0.5,0.7,0.9]};
+function rlev(x,th){ return x>=th[2]?3:x>=th[1]?2:x>=th[0]?1:0; }
+function gwLevel(o){ if(!o.r) return null; if(o.r.lv<0) return -1;
+  if(o.r.rn!==undefined){ const th=RTH[o.r.cls]||RTH['기타']; const a=rlev(o.r.rn,th); return Math.max(a, Math.min(rlev(o.r.r10,th), a+1)); }
+  return Math.max(...IND.map((I,i)=>{const v=o.r.it[i]; if(v===null) return -1; if(o.r.sg&&!o.r.sg[i]) return 0; return v>=I.th[2]?3:v>=I.th[1]?2:v>=I.th[0]?1:0;})); }
+function gwSt(o){ const l=gwLevel(o); return l===null?'none':l<0?'none':LV[l]; }
+const GWN=DATA.osm.filter(o=>o.r).length;
+function rthTable(){
+  $('#rthtab').innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px"><thead><tr style="color:var(--muted);text-align:left"><th>시설물 종별</th><th>관심 ≥</th><th>주의 ≥</th><th>경고 ≥</th></tr></thead><tbody>${
+    Object.keys(RTH).map((c,i)=>`<tr style="border-top:1px solid var(--line)"><td style="padding:4px 0">${c} <span class="sub">(허용변위 대비)</span></td>${RTH[c].map((v,j)=>`<td><input id="rt${i}${j}" type="number" step="0.05" min="0" value="${v}" style="width:58px;font:inherit;padding:2px 4px;border:1px solid var(--line);border-radius:4px;background:var(--panel);color:var(--ink)"></td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  Object.keys(RTH).forEach((c,i)=>RTH[c].forEach((_,j)=>$('#rt'+i+j).addEventListener('change',e=>{RTH[c][j]=+e.target.value||0; render();})));
+}
+function thrTable(){
+  $('#thrtab').innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px"><thead><tr style="color:var(--muted);text-align:left"><th>지표</th><th>관심 ≥</th><th>주의 ≥</th><th>경고 ≥</th></tr></thead><tbody>${
+    IND.map((I,i)=>`<tr style="border-top:1px solid var(--line)"><td style="padding:4px 0">${I.name} <span class="sub">(${I.unit})</span></td>${I.th.map((v,j)=>`<td><input id="th${i}${j}" type="number" step="0.5" min="0" value="${v}" style="width:58px;font:inherit;padding:2px 4px;border:1px solid var(--line);border-radius:4px;background:var(--panel);color:var(--ink)"></td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  IND.forEach((I,i)=>I.th.forEach((_,j)=>$('#th'+i+j).addEventListener('change',e=>{I.th[j]=+e.target.value||0; for(const k in RCACHE) delete RCACHE[k]; render();})));
+}
+function col(st){ return css(STATUS[st][1]); }
+function pill(st){ return `<span class="pill" style="background:${col(st)}">${STATUS[st][0]}</span>`; }
+const feats=DATA.muni.features;
+const proj=d3.geoMercator(), path=d3.geoPath(proj);
+const gM=svg.append('g'), gL=svg.append('g'), gO=svg.append('g'), gB=svg.append('g');
+function fitTo(f){ proj.fitExtent([[18,18],[W-18,H-18]],f); }
+function draw(){
+  const sel=state.city;
+  fitTo(sel? feats.find(f=>f.properties.name===sel) : DATA.muni);
+  gM.selectAll('path').data(feats,d=>d.properties.code).join('path').attr('class',d=>'muni'+(sel&&d.properties.name!==sel?' dim':'')+(d.properties.name===sel?' sel':''))
+    .attr('d',path).style('fill',d=>{const st=cityStatus(d.properties.name); return st==='none'?null:`color-mix(in srgb, ${col(st)} ${sel?12:30}%, var(--land))`;})
+    .on('click',(e,d)=>{ state={city:d.properties.name,bridge:null,node:null,osm:null}; render(); })
+    .selectAll('title').data(d=>[d]).join('title').text(d=>d.properties.name);
+  gL.selectAll('text').data(sel?[]:feats,d=>d.properties.code).join('text').attr('class','mlabel')
+    .attr('x',d=>path.centroid(d)[0]).attr('y',d=>path.centroid(d)[1]).text(d=>d.properties.name);
+  const os=sel?DATA.osm.filter(o=>o.c===sel):DATA.osm.filter(o=>o.r&&gwLevel(o)>=2);
+  gO.selectAll('circle').data(os,o=>o.n+o.lat).join('circle').attr('fill',o=>{const s=gwSt(o); return o.r&&s!=='none'?col(s):'none';}).attr('stroke-width',1.1)
+    .attr('cx',o=>proj([o.lon,o.lat])[0]).attr('cy',o=>proj([o.lon,o.lat])[1]).style('cursor','pointer')
+    .on('click',(e,o)=>{state.osm=o; state.bridge=null; render();}).selectAll('title').data(o=>[o]).join('title').text(o=>o.n+(o.t?' · '+o.t:''));
+  gO.selectAll('circle').attr('stroke',o=>o===state.osm?css('--sel'):o.r&&o.r.lv>=0?css('--panel'):css('--muted')).attr('r',o=>o===state.osm?7:o.r&&gwLevel(o)>=2?5:3.2);
+  gO.selectAll('circle').filter(o=>o.r&&gwLevel(o)>=2).raise();
+  const bs=DATA.bridges.filter(b=>!sel||b.city===sel);
+  const g=gB.selectAll('g').data(bs,b=>b.id).join(en=>{const g=en.append('g'); g.append('circle').attr('class','bmark'); g.append('text').attr('class','blabel'); return g;});
+  g.attr('transform',b=>`translate(${proj([b.lon,b.lat])})`).style('cursor','pointer').on('click',(e,b)=>{ state={city:b.city,bridge:b.id,node:null,osm:null}; render(); });
+  g.select('circle').attr('r',b=>b.id===state.bridge?11:8).attr('fill',b=>col(bStatus(b))).attr('stroke',b=>b.id===state.bridge?css('--sel'):css('--panel'));
+  g.select('text').attr('x',12).attr('y',4).text(b=>sel?b.name:'');
+}
+function crumbs(){
+  $('#c0').disabled=!state.city; const c1=$('#c1'), c2=$('#c2');
+  c1.hidden=$('#s1').hidden=!state.city; c1.textContent=state.city||''; c1.disabled=state.city&&!state.bridge;
+  const b=DATA.bridges.find(x=>x.id===state.bridge); const nm=b?b.name:(state.osm?state.osm.n:''); c2.hidden=$('#s2').hidden=!nm; c2.textContent=nm; c1.disabled=state.city&&!nm;
+}
+$('#c0').onclick=()=>{state={city:null,bridge:null,node:null,osm:null};render();};
+$('#c1').onclick=()=>{state={city:state.city,bridge:null,node:null,osm:null};render();};
+function panelProvince(){
+  const rows=feats.map(f=>({name:f.properties.name,st:cityStatus(f.properties.name),n:DATA.bridges.filter(b=>b.city===f.properties.name).length,o:DATA.osm.filter(o=>o.c===f.properties.name).length}))
+    .sort((a,b)=>b.n-a.n||b.o-a.o);
+  const nb=DATA.bridges.length, prob=DATA.bridges.filter(b=>risk(b).level>0).sort((a,b)=>risk(b).level-risk(a).level);
+  const G=DATA.osm.filter(o=>o.r), cnt=[0,0,0,0], nj=G.filter(o=>o.r.lv<0).length; G.forEach(o=>{const l=gwLevel(o); if(l>=0) cnt[l]++;});
+  const gaAll=G.filter(o=>gwLevel(o)>=2).sort((a,b)=>gwLevel(b)-gwLevel(a)||(b.r.rn||0)-(a.r.rn||0)); const ga=gaAll.filter(o=>!o.r.rv), grv=gaAll.filter(o=>o.r.rv);
+  const gwBox=G.length?`<div class="okmsg"><b>강원 전역 InSAR 선별 (Sentinel-1 상승 궤도 54, ${DATA.gwinfo.period})</b><br>처리 ${G.length.toLocaleString()}개 교량 (국토교통부 전국교량표준데이터 강원 ${DATA.gwinfo.reg_total.toLocaleString()}개 기준) · 판정 ${(G.length-nj).toLocaleString()}개 · 판정 불가 ${nj.toLocaleString()}개 (교량 위 PS 없음 또는 기준점 조건 미달)<br>
+     ${LV.map((s,i)=>`${pill(s)} ${cnt[i].toLocaleString()}`).join(' ')}</div>
+     ${ga.length?`<div class="alert"><b>위험군 알람 — 강원 전역 선별 (주의 이상 ${ga.length}개${grv.length?` · 자료 부족으로 확인 필요 ${grv.length}개 별도`:''})</b><div class="list" style="margin-top:6px">${ga.slice(0,40).map(o=>`<button class="item" type="button" data-go="${DATA.osm.indexOf(o)}" style="grid-template-columns:auto 1fr"><span>${pill(gwSt(o))}</span><span><b>${o.c} ${o.n}</b> <span class="sub">연장 ${o.r.len} m</span><br><span class="sub">${gwWhy(o)} · 신뢰도 ${o.r.conf}</span></span></button>`).join('')}</div></div>`:''}`:'';
+  $('#panel').innerHTML=`<h2>강원도 18개 시·군</h2><p class="sub">OpenStreetMap 교량 ${DATA.osm.length.toLocaleString()}개 · InSAR 분석 ${nb}개 · 주의 이상 ${prob.length}개. 시·군을 누르면 해당 지역 교량이 표시됩니다.</p>
+   ${gwBox}${prob.length?`<div class="alert"><b>위험군 알람 — 정밀 분석 교량 (InSAR)</b><div class="list" style="margin-top:6px">${prob.map(b=>{const r=risk(b);return `<button class="item" type="button" data-ab="${b.id}" style="grid-template-columns:auto 1fr"><span>${pill(r.st)}</span><span><b>${b.city} ${b.name}</b><br><span class="sub">${r.top.map(I=>`${I.name} ${r.items[I.k].val.toFixed(2)} ${I.unit} — ${r.items[I.k].where}`).join(' · ')} · 신뢰도 ${r.conf}</span></span></button>`;}).join('')}</div></div>`:''}
+   <div class="list">${rows.map(r=>`<button class="item" type="button" data-c="${r.name}"><i class="dot" style="background:${col(r.st)}"></i><span>${r.name}</span><span class="sub mono">분석 ${r.n} / OSM ${r.o}</span></button>`).join('')}</div>`;
+  document.querySelectorAll('[data-c]').forEach(el=>el.onclick=()=>{state={city:el.dataset.c,bridge:null,node:null,osm:null};render();});
+  document.querySelectorAll('[data-ab]').forEach(el=>el.onclick=()=>{const b=DATA.bridges.find(x=>x.id===el.dataset.ab); state={city:b.city,bridge:b.id,node:null,osm:null};render();});
+  document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>{const o=DATA.osm[+el.dataset.go]; state={city:o.c,bridge:null,node:null,osm:o};render();});
+}
+function gwWhy(o){ const r=o.r; if(r.rn===undefined) return ''; return `${r.cls} ${r.typ} · 허용변위 대비 현재 ${(r.rn*100).toFixed(0)} % · 10년 예측 ${(r.r10*100).toFixed(0)} %`; }
+function panelCity(){
+  const bs=DATA.bridges.filter(b=>b.city===state.city);
+  $('#panel').innerHTML=`<h2>${state.city}</h2><p class="sub">${bs.length?`분석 교량 ${bs.length}개. 교량을 누르면 상세 결과가 열립니다.`:'아직 분석된 교량이 없습니다.'}</p>
+   <div class="list">${bs.map(b=>`<button class="item" type="button" data-b="${b.id}"><i class="dot" style="background:${col(bStatus(b))}"></i><span>${b.name} <span class="sub">연장 ${b.len} m</span></span>${pill(bStatus(b))}</button>`).join('')}</div>
+   ${(()=>{const gs=DATA.osm.filter(o=>o.c===state.city&&o.r).sort((a,b)=>(gwLevel(b)??-2)-(gwLevel(a)??-2)||(b.r.it[0]||0)-(a.r.it[0]||0)); if(!gs.length) return '';
+     const c=[0,0,0,0]; gs.forEach(o=>{const l=gwLevel(o); if(l>=0) c[l]++;});
+     return `<h2 style="margin-top:14px">강원 전역 선별 결과 ${gs.length}개</h2><p class="sub">${LV.map((s,i)=>`${STATUS[s][0]} ${c[i]}`).join(' · ')} · 판정 불가 ${gs.filter(o=>o.r.lv<0).length}</p>
+     <div class="list" style="max-height:260px;overflow:auto">${gs.slice(0,150).map(o=>`<button class="item" type="button" data-go="${DATA.osm.indexOf(o)}"><i class="dot" style="background:${gwLevel(o)>=0?col(gwSt(o)):'transparent'};border:1.5px solid var(--muted)"></i><span>${o.n} <span class="sub">${o.r.len} m · PS ${o.r.nps??0}점</span></span>${gwLevel(o)>=0?pill(gwSt(o)):'<span class="sub">판정 불가</span>'}</button>`).join('')}</div>`;})()}
+   <h2 style="margin-top:14px">OSM 교량 ${DATA.osm.filter(o=>o.c===state.city).length}개</h2>
+   <input id="q" type="search" placeholder="교량 이름 검색" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)">
+   <div class="list" id="olist" style="max-height:300px;overflow:auto"></div>`;
+  document.querySelectorAll('[data-b]').forEach(el=>el.onclick=()=>{state.bridge=el.dataset.b;state.osm=null;render();});
+  document.querySelectorAll('[data-go]').forEach(el=>el.onclick=()=>{state.osm=DATA.osm[+el.dataset.go];render();});
+  const fill=()=>{const q=$('#q').value.trim(); const os=DATA.osm.filter(o=>o.c===state.city&&(!q||o.n.includes(q))).slice(0,200);
+    $('#olist').innerHTML=os.map((o,i)=>`<button class="item" type="button" data-o="${i}"><i class="dot" style="background:${o.r&&gwLevel(o)>=0?col(gwSt(o)):'transparent'};border:1.5px solid var(--muted)"></i><span>${o.n}</span><span class="sub">${o.r?(gwLevel(o)>=0?STATUS[gwSt(o)][0]:'판정 불가'):(o.t||'미처리')}</span></button>`).join('')||'<p class="sub">검색 결과 없음</p>';
+    $('#olist').querySelectorAll('[data-o]').forEach(el=>el.onclick=()=>{state.osm=os[+el.dataset.o];render();});};
+  $('#q').addEventListener('input',fill); fill();
+}
+function panelBridge(){
+  const b=DATA.bridges.find(x=>x.id===state.bridge), st=bStatus(b), m=maxAbs(b);
+  let probs=[], html=`<h2>${b.name} ${pill(st)}</h2><p class="sub">${b.city} · ${b.method}</p>
+   <div class="kv"><div><b class="mono">${b.len} m</b><span>연장</span></div><div><b class="mono">${b.width} m</b><span>폭</span></div>
+   <div><b class="mono">${b.images}장</b><span>Sentinel-1 (${b.period})</span></div><div><b class="mono">${m.toFixed(2)}</b><span>최대 |수직 변위속도| mm/yr</span></div></div>`;
+  const r=risk(b);
+  html+= r.level>0 ? `<div class="alert"><b>위험도 ${STATUS[r.st][0]}</b> — ${r.top.map(I=>`${I.name} ${r.items[I.k].val.toFixed(2)} ${I.unit} (기준 ${I.th[r.level-1]}) · 위치: ${r.items[I.k].where}`).join('<br>')}</div>`
+                   : `<div class="okmsg"><b>위험도 정상</b> — 4개 InSAR 지표가 모두 관심 기준 미만입니다.</div>`;
+  html+=`<table style="width:100%;border-collapse:collapse;font-size:12px;margin:6px 0"><thead><tr style="color:var(--muted);text-align:left"><th>InSAR 지표</th><th>값</th><th>등급</th><th>위치·근거</th></tr></thead><tbody>${
+    IND.map(I=>{const it=r.items[I.k]; return `<tr style="border-top:1px solid var(--line)"><td style="padding:5px 4px 5px 0">${I.name}<br><span class="sub">${I.why}</span></td><td class="mono">${isFinite(it.val)?it.val.toFixed(2)+' '+I.unit:'—'}</td><td>${it.lv<0?'<span class="sub">평가 불가</span>':pill(LV[it.lv])}</td><td class="sub">${it.where}</td></tr>`;}).join('')}</tbody></table>
+    <p class="note">자료 신뢰도: <b>${r.conf}</b> — ${r.confWhy}</p>`;
+  probs=b.nodes?b.nodes.filter(n=>Math.abs(n.v)>=IND[0].th[0]):[];
+  if(!b.nodes&&b.vmin!==undefined) html+=`<div class="kv"><div><b class="mono">${b.vmin} ~ +${b.vmax}</b><span>수직 변위속도 범위 mm/yr</span></div><div><b class="mono">${b.cum} mm</b><span>최대 누적 변위</span></div></div>`;
+  if(b.qc) html+=`<div class="okmsg"><b>자료 품질 필터</b> · ${b.qc.total}장 중 ${b.qc.kept}장 사용 (수직 기선 ${b.qc.bmax} m 초과 ${b.qc.drop_bperp}장, 기준점 결맞음 ${b.qc.gmin} 미만 ${b.qc.drop_refcoh}장 제외)<br>기준점: 교량에서 ${b.qc.ref_dist} m 떨어진 안정 지반 PS ${b.qc.ref_n}점 (시간 결맞음 평균 ${b.qc.ref_coh}, 시기별 기준점 결맞음 중앙값 ${b.qc.refcoh_med})</div>`;
+  if(b.thermal) html+=`<div class="okmsg"><b>열 신축 보정</b> · 촬영 시각 기온 ${b.thermal.T_min}~${b.thermal.T_max} °C, 기온 계수 중앙값 ${b.thermal.kT_med} mm/°C (범위 ${b.thermal.kT_min}~${b.thermal.kT_max})<br>잔차 표준편차(추세를 뺀 뒤 남은 변동) ${b.thermal.std_before} → ${b.thermal.std_after} mm</div>`;
+  html+=`<div class="chartbox" id="bchart"></div><div class="chartbox" id="tchart"></div><p class="note">${b.note}</p>`;
+  if(b.ifc){ const I=b.ifc; html+=`<h2 style="margin-top:14px">IFC 모델 <span class="sub">(IFC4X3 · ${I.type})</span></h2>
+    <img src="${I.img}" alt="${b.name} IFC 모델 미리보기" style="width:100%;border:1px solid var(--line);border-radius:6px;background:#fff">
+    <div class="kv"><div><b class="mono">${I.spans} × ${I.spanlen} m</b><span>경간 구성</span></div><div><b class="mono">${I.bearing}°</b><span>교축 방위각 (OSM way ${I.osm})</span></div>
+    ${Object.entries(I.count).map(([k,v])=>`<div><b class="mono">${v}</b><span>${k}</span></div>`).join('')}</div>
+    <p class="note">상판은 3 m 세그먼트로 나뉘어 있고, 세그먼트·교각·교대마다 Pset_InSAR(수직 변위속도, 자료 출처, 판정)가 들어 있습니다. 가정사항: ${I.assume}<br>파일: <span class="mono">${I.file}</span></p>`; }
+  $('#panel').innerHTML=html;
+  if(b.nodes) nodeCharts(b); else if(b.points) pointMap(b);
+}
+function nodeCharts(b){
+  const w=420,h=150,m={l:40,r:10,t:22,b:28};
+  const s=d3.select('#bchart').append('svg').attr('viewBox',`0 0 ${w} ${h}`).attr('width','100%');
+  const x=d3.scaleLinear().domain(d3.extent(b.nodes,n=>n.s)).nice().range([m.l,w-m.r]);
+  const ext=Math.max(IND[0].th[2]*1.1,d3.max(b.nodes,n=>Math.abs(n.v))*1.2); const y=d3.scaleLinear().domain([-ext,ext]).range([h-m.b,m.t]);
+  s.append('rect').attr('x',m.l).attr('width',w-m.l-m.r).attr('y',y(IND[0].th[0])).attr('height',y(-IND[0].th[0])-y(IND[0].th[0])).attr('fill',css('--ok')).attr('opacity',.08);
+  s.append('line').attr('x1',m.l).attr('x2',w-m.r).attr('y1',y(0)).attr('y2',y(0)).attr('stroke',css('--line'));
+  s.append('g').attr('class','axis').attr('transform',`translate(0,${h-m.b})`).call(d3.axisBottom(x).ticks(6));
+  s.append('g').attr('class','axis').attr('transform',`translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4));
+  s.append('text').attr('x',m.l).attr('y',12).attr('font-size',11).text('3 m 노드별 수직 변위속도 [mm/yr] — 노드를 누르면 시계열 (s: 교축 위치 m, 남→북)');
+  const SC={APES:css('--accent'),Capon:css('--accent'),StaMPS:css('--accent'),PS:css('--accent'),DS:css('--none')};
+  s.selectAll('rect.n').data(b.nodes).join('rect').attr('class','n').attr('x',n=>x(n.s)-2.6).attr('width',5.2)
+   .attr('y',n=>Math.min(y(0),y(n.v))).attr('height',n=>Math.abs(y(n.v)-y(0))||1)
+   .attr('fill',n=>{const a=Math.abs(n.v),th=IND[0].th; return a>=th[0]?col(LV[a>=th[2]?3:a>=th[1]?2:1]):SC[n.src]||css('--none');})
+   .attr('stroke',n=>n===state.node?css('--sel'):'none').style('cursor','pointer')
+   .on('click',(e,n)=>{state.node=n; d3.select('#bchart').html(''); d3.select('#tchart').html(''); nodeCharts(b);})
+   .append('title').text(n=>`s=${n.s} m · ${n.v} mm/yr · ${n.src==='DS'?'DS 보완':n.src+' PS'}`);
+  const lg=s.append('g').attr('transform',`translate(${w-170},12)`);
+  [['PS 노드',css('--accent')],['DS 보완',css('--none')]].forEach(([t,c],i)=>{lg.append('rect').attr('x',i*80).attr('y',-8).attr('width',9).attr('height',9).attr('fill',c);lg.append('text').attr('x',i*80+13).attr('y',0).attr('font-size',10).text(t);});
+  const n=state.node||b.nodes.reduce((a,c)=>Math.abs(c.v)>Math.abs(a.v)?c:a);
+  const tw=420,th=150,tm={l:40,r:10,t:22,b:24};
+  const t=d3.select('#tchart').append('svg').attr('viewBox',`0 0 ${tw} ${th}`).attr('width','100%');
+  const dts=DATA.dates.map(d=>new Date(+d.slice(0,4),+d.slice(4,6)-1,+d.slice(6))); const pts=n.ts.map((v,i)=>[dts[i],v]).filter(p=>p[1]!==null);
+  const tx=d3.scaleTime().domain(d3.extent(dts)).range([tm.l,tw-tm.r]); const ty=d3.scaleLinear().domain(d3.extent(pts,p=>p[1])).nice().range([th-tm.b,tm.t]);
+  t.append('g').attr('class','axis').attr('transform',`translate(0,${th-tm.b})`).call(d3.axisBottom(tx).ticks(6).tickFormat(d3.timeFormat('%Y')));
+  t.append('g').attr('class','axis').attr('transform',`translate(${tm.l},0)`).call(d3.axisLeft(ty).ticks(4));
+  t.append('path').datum(pts).attr('fill','none').attr('stroke',css('--accent')).attr('stroke-width',1.1).attr('d',d3.line().x(p=>tx(p[0])).y(p=>ty(p[1])));
+  t.append('text').attr('x',tm.l).attr('y',12).attr('font-size',11).text(`노드 s = ${n.s} m 수직 변위 시계열 [mm] · ${n.v} mm/yr · ${n.src==='DS'?'DS 보완':n.src+' PS'}${state.node?'':' (최대 노드)'}`);
+}
+function pointMap(b){
+  const w=420,h=300; const s=d3.select('#bchart').append('svg').attr('viewBox',`0 0 ${w} ${h}`).attr('width','100%');
+  const poly={type:'Feature',geometry:{type:'Polygon',coordinates:[b.poly]}}; const pj=d3.geoMercator().fitExtent([[60,40],[w-60,h-30]],poly), p=d3.geoPath(pj);
+  s.append('path').datum(poly).attr('d',p).attr('fill',css('--land')).attr('stroke',css('--accent'));
+  const cs=d3.scaleDiverging(t=>d3.interpolateRdBu(1-t)).domain([-2,0,2]);
+  s.selectAll('circle').data(b.points).join('circle').attr('cx',d=>pj([d.lon,d.lat])[0]).attr('cy',d=>pj([d.lon,d.lat])[1]).attr('r',6)
+   .attr('fill',d=>cs(d.v)).attr('stroke',d=>Math.abs(d.v)>=IND[0].th[0]?css('--bad'):css('--ink')).attr('stroke-width',d=>Math.abs(d.v)>=IND[0].th[0]?2.5:.6)
+   .append('title').text(d=>`${d.v} mm/yr`);
+  s.append('text').attr('x',10).attr('y',16).attr('font-size',11).text(`교량 폴리곤과 주변 PS ${b.points.length}점 — 색: 수직 변위속도 (StaMPS, 참고)`);
+}
+function panelOsm(){ const o=state.osm;
+  if(o.r) return panelGw(o);
+  $('#panel').innerHTML=`<h2>${o.n} <span class="pill" style="background:${css('--none')}">InSAR 미처리</span></h2><p class="sub">${o.c} · ${o.cls?`${o.cls} · ${o.t||'형식 미상'} · 연장 ${o.len} m · ${o.yr||'준공연도 미상'}년 준공 · 안전등급 ${o.gr||'-'}`:'OpenStreetMap'} · 처리 대기</p>
+   <div class="kv"><div><b>${o.t||'미기재'}</b><span>교량 형식 (OSM bridge:structure)</span></div><div><b class="mono">${o.lat.toFixed(5)}, ${o.lon.toFixed(5)}</b><span>위치 (위도, 경도)</span></div></div>
+   <p class="note">InSAR 처리와 IFC 생성 대상에 추가하면 같은 방식으로 3 m 노드 변위와 IFC 모델이 만들어집니다.</p>
+   <button class="item" type="button" id="back" style="margin-top:8px"><span></span><span>${o.c} 목록으로</span><span></span></button>`;
+  $('#back').onclick=()=>{state.osm=null;render();}; }
+function panelGw(o){ const r=o.r, l=gwLevel(o);
+  let h=`<h2>${o.n} ${l>=0?pill(gwSt(o)):`<span class="pill" style="background:${css('--none')}">판정 불가</span>`}${r.rv&&l>=2?' <span class="sub">(자료 부족 · 확인 필요)</span>':''}</h2>
+   <p class="sub">${o.c} · ${o.cls?`<b>${o.cls}</b> · ${o.t||'형식 미상'} · 연장 ${o.len} m · ${o.yr||'?'}년 준공 · 최근 안전점검 ${o.gr||'-'} (${o.ins||''})`:'OSM 교량 (대장 미연계)'}</p>`;
+  if(l<0){ h+=`<div class="alert">${r.why}</div><p class="note">Sentinel-1 화소(약 4 m × 14 m)보다 작거나 주변에 안정 산란체가 없는 교량은 같은 방식으로 판정할 수 없습니다. 정밀 분석(DS 보완, Capon·APES 재초점) 대상으로 넘깁니다.</p>`; }
+  else {
+    h+=`<div class="kv"><div><b class="mono">${r.nps}</b><span>교량 위 PS (점)</span></div><div><b class="mono">${Math.round(r.cov*100)} %</b><span>3 m 노드 중 PS 확보 비율</span></div><div><b>${r.conf}</b><span>신뢰도</span></div><div><b class="mono">${r.q[1]}/${r.q[0]}</b><span>사용 영상 / 전체</span></div></div>
+    ${r.rn!==undefined?`<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin:6px 0"><thead><tr class="sub" style="text-align:left"><th>항목</th><th>측정 (${r.tob}년)</th><th>10년 예측</th><th>허용값</th><th>비율 (현재 / 예측)</th></tr></thead><tbody>
+      <tr style="border-top:1px solid var(--line)"><td style="padding:4px 0">누적 수직변위 (주변 지반 대비)</td><td class="mono">${r.dn} mm</td><td class="mono">${r.d10} mm</td><td class="mono">${r.sa} mm</td><td class="mono">${(r.dn/r.sa*100).toFixed(0)} % / ${(r.d10/r.sa*100).toFixed(0)} %</td></tr>
+      <tr style="border-top:1px solid var(--line)"><td style="padding:4px 0">인접 지점 부등변위 (각변위)</td><td class="mono">${(r.bn*1000).toFixed(3)} ‰</td><td class="mono">${(r.b10*1000).toFixed(3)} ‰</td><td class="mono">${(r.ba*1000).toFixed(1)} ‰ (경간 ${r.sp} m)</td><td class="mono">${(r.bn/r.ba*100).toFixed(0)} % / ${(r.b10/r.ba*100).toFixed(0)} %</td></tr>
+      </tbody></table><p class="note">허용변위 대비 비율 ${(r.rn*100).toFixed(0)} % (10년 예측 ${(r.r10*100).toFixed(0)} %) → ${r.cls} 기준 [관심 ${(RTH[r.cls]||RTH['기타'])[0]*100} % · 주의 ${(RTH[r.cls]||RTH['기타'])[1]*100} % · 경고 ${(RTH[r.cls]||RTH['기타'])[2]*100} %]. 경간은 형식별 대표값(${r.typ})으로 가정.${r.nt?' '+r.nt:''}</p>`:''}
+    <details><summary class="sub" style="cursor:pointer">참고: InSAR 변위 지표 4종</summary><table style="width:100%;border-collapse:collapse;font-size:12.5px;margin:6px 0"><thead><tr class="sub" style="text-align:left"><th>지표</th><th>값</th><th>판정</th><th>위치</th></tr></thead><tbody>${IND.map((I,i)=>{const v=r.it[i]; const ns=r.sg&&!r.sg[i]; const lv=v===null?-1:ns?0:(v>=I.th[2]?3:v>=I.th[1]?2:v>=I.th[0]?1:0);
+      return `<tr style="border-top:1px solid var(--line)"><td style="padding:4px 0">${I.name}</td><td class="mono">${v===null?'—':v.toFixed(2)+' '+I.unit}</td><td>${lv<0?'<span class="sub">평가 불가</span>':pill(LV[lv])}${ns?' <span class="sub">(오차 범위 내)</span>':''}</td><td class="sub">${r.wh[i]??''}</td></tr>`;}).join('')}</tbody></table></details>
+    <div class="okmsg"><b>자료 품질 필터</b> · 수직 기선 200 m 초과 ${r.q[2]}장, 기준점 결맞음 0.95 미만 ${r.q[3]}장 제외 · 기준점: 교량에서 100 m 이상 떨어진 안정 지반 PS ${r.q[4]}점 (시간 결맞음 ≥ 0.95, 시기별 결맞음 중앙값 ${r.q[5]})<br>
+    <b>열 신축 보정</b> · 기온 계수 중앙값 ${r.kT} mm/°C · 잔차 표준편차(추세를 뺀 뒤 남은 변동) ${r.sd[0]} → ${r.sd[1]} mm</div>
+    <div class="chartbox" id="gchart"></div>`; }
+  h+=`<button class="item" type="button" id="back" style="margin-top:8px"><span></span><span>${o.c} 목록으로</span><span></span></button>`;
+  $('#panel').innerHTML=h; $('#back').onclick=()=>{state.osm=null;render();};
+  if(l>=0&&r.ts){ const dts=DATA.gwinfo.dates.map(d=>new Date(+d.slice(0,4),+d.slice(4,6)-1,+d.slice(6))); const pts=r.ts.map((v,i)=>[dts[i],v]).filter(p=>p[1]!==null);
+    const w=Math.min(560,$('#panel').clientWidth-8), hh=190, m={l:40,r:10,t:16,b:24}; const sv=d3.select('#gchart').append('svg').attr('width',w).attr('height',hh);
+    const x=d3.scaleTime().domain(d3.extent(pts,p=>p[0])).range([m.l,w-m.r]), y=d3.scaleLinear().domain(d3.extent(pts,p=>p[1])).nice().range([hh-m.b,m.t]);
+    sv.append('g').attr('class','axis').attr('transform',`translate(0,${hh-m.b})`).call(d3.axisBottom(x).ticks(6)); sv.append('g').attr('class','axis').attr('transform',`translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5));
+    sv.append('path').datum(pts).attr('fill','none').attr('stroke',col(gwSt(o))).attr('stroke-width',1.4).attr('d',d3.line().x(p=>x(p[0])).y(p=>y(p[1])));
+    sv.append('text').attr('x',m.l+4).attr('y',11).attr('font-size',11).text('교량 평균 수직 변위 [mm] (열 신축 보정 후)'); }
+}
+function render(){ crumbs(); draw(); if(state.bridge) panelBridge(); else if(state.osm) panelOsm(); else if(state.city) panelCity(); else panelProvince(); }
+thrTable(); rthTable(); render();
+</script>

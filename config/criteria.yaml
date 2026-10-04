@@ -1,0 +1,39 @@
+# Judgement criteria (all editable). InSAR measures displacement since the FIRST acquisition, relative to the surrounding ground.
+quality:
+  bperp_max_m: 200            # drop dates with |perpendicular baseline| > 200 m
+  ref_coherence: [0.95, 0.92, 0.90, 0.85, 0.80]   # reference PS cluster temporal coherence ladder (first value = standard)
+  ref_date_coherence: 0.95    # per-date phase coherence of the reference cluster (drop dates below; follows the ladder value)
+  da_standard: 0.42           # amplitude dispersion for PS candidates; adaptive (best 12 %, <= 0.70) when < 1500 candidates
+ground_ring_m: [30, 300]      # surrounding ground used as the local reference and as the noise level (2 x MAD)
+allowable:
+  total_settlement_mm: 50     # tolerable total bridge settlement (FHWA / AASHTO tolerable-movement studies)
+  angular_distortion:          # adjacent-support differential settlement / span (AASHTO LRFD 10.5.2.2)
+    continuous: 0.004
+    simple: 0.008
+  continuous_types: [라멘교, PSC박스거더교, 강박스거더교, 사장교, 현수교, 아치교, 트러스교]
+  typical_span_m:              # used when the registry has no span: capped by the bridge length
+    RC슬래브교: 10
+    RC중공슬래브교: 15
+    PSC슬래브교: 20
+    라멘교: 15
+    RCT거더교: 15
+    PSCI거더교: 30
+    PSC박스거더교: 50
+    강박스거더교: 45
+    프리플렉스거더교: 35
+    강I거더교: 35
+    강플레이트거더교: 30
+    사장교: 150
+    현수교: 200
+    아치교: 80
+    트러스교: 60
+    default: 25
+ratio_thresholds:              # displacement / allowable -> 관심, 주의, 경고 (by facility class of 시설물안전법)
+  1종: [0.3, 0.5, 0.7]
+  2종: [0.4, 0.6, 0.8]
+  3종: [0.5, 0.7, 0.9]
+  기타: [0.5, 0.7, 0.9]
+projection_years: 10           # projected ratio at the current rate may raise the grade by one step at most
+review:                        # grades >= 주의 with weak data are reported as "확인 필요" instead of an alarm
+  min_deck_ps: 5
+  min_node_cover: 0.25

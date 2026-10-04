@@ -1,0 +1,19 @@
+# Whole province: 강원특별자치도 (all 18 시·군), all Sentinel-1 tracks over it
+name: gangwon
+title: 강원특별자치도
+sido: 강원
+min_length_m: 0
+start: '2018-06-01'
+boundaries: data/gangwon_muni.geojson
+tracks: []
+parallel_tiles: 5
+parallel_second: 2
+paths:
+  data: /mnt/e/InSAR_DATA/bim
+  work: /home/insar/bim
+  conda: /home/insar/miniforge3
+  stamps: /home/insar/StaMPS
+  dem: /home/insar/gw/DEM/dem.wgs84
+  orbits: /mnt/e/InSAR_DATA/bim/orbits
+  aux: /home/insar/insar_processing_naegok/aux
+criteria: {}

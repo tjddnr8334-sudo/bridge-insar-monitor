@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+logs/*.log
+*.SAFE
+*.EOF
+*.slc
+*.h5
+*.npz
+*.sqlite
+data/registry/
+.netrc
+.cdsapirc
