@@ -12,9 +12,19 @@ def find(aoi_wkt, start='2018-06-01', end=None, min_dates=30):
         p = x.properties; k = (p['flightDirection'], p['pathNumber']); by[k].add(p['startTime'][:10].replace('-', '')); t.setdefault(k, p['startTime'][11:16])
     out = []
     for (d, path), ds in sorted(by.items()):
-        if len(ds) < min_dates: continue
-        ds = sorted(ds)
-        out.append(dict(dir=d, path=int(path), n_dates=len(ds), first=ds[0], last=ds[-1], utc=t[(d, path)], reference_date=reference(ds)))
+        for k, per in enumerate(periods(sorted(ds))):   # acquisition gaps > 1 year (e.g. descending 2022-2024) split the track
+            if len(per) < min_dates: continue
+            tag = '' if k == 0 and per[-1] == sorted(ds)[-1] else '_%s' % per[0][:4]
+            out.append(dict(dir=d, path=int(path), n_dates=len(per), first=per[0], last=per[-1], utc=t[(d, path)], reference_date=reference(per),
+                            start='%s-%s-%s' % (per[0][:4], per[0][4:6], per[0][6:]), end='%s-%s-%s' % (per[-1][:4], per[-1][4:6], per[-1][6:]), tag=tag))
+    return out
+
+
+def periods(dates, gap_days=365):
+    d = [datetime.datetime.strptime(x, '%Y%m%d') for x in dates]; out = [[dates[0]]]
+    for i in range(1, len(d)):
+        if (d[i] - d[i - 1]).days > gap_days: out.append([])
+        out[-1].append(dates[i])
     return out
 
 
@@ -38,8 +48,15 @@ def available_dates(aoi_wkt, path, start, end=None):
     if end and len(end) == 8: end = '%s-%s-%s' % (end[:4], end[4:6], end[6:])
     import asf_search as asf
     end = end or datetime.date.today().isoformat()
-    r = asf.search(dataset='SLC-BURST', relativeOrbit=path, start=start, end=end, intersectsWith=aoi_wkt, polarization='VV')
-    c = collections.Counter(x.properties['startTime'][:10].replace('-', '') for x in r)
+    c = collections.Counter()
+    for attempt in range(4):   # CMR occasionally returns incomplete pages: repeat and keep the union
+        try:
+            r = asf.search(dataset='SLC-BURST', relativeOrbit=path, start=start, end=end, intersectsWith=aoi_wkt, polarization='VV')
+        except Exception:
+            continue
+        cc = collections.Counter(x.properties['startTime'][:10].replace('-', '') for x in r)
+        for k_, v_ in cc.items(): c[k_] = max(c[k_], v_)
+        if len(cc) and len(cc) == len(c) and attempt >= 1: break
     if not c: return []
     full = max(c.values())
     return sorted(d for d, n in c.items() if n >= 0.8 * full)     # dates covering (almost) all AOI bursts

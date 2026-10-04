@@ -31,3 +31,8 @@ def test_bridges_and_tiles():
 def test_reference_date_is_middle():
     d = ['20180101', '20200101', '20220101', '20240101', '20260101']
     assert tracks.reference(d) == '20220101'
+
+
+def test_periods_split_at_long_gaps():
+    p = tracks.periods(['20180601', '20190101', '20211201', '20220909', '20250301', '20260101'])
+    assert [x[0] for x in p] == ['20180601', '20211201', '20250301']
