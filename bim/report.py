@@ -52,4 +52,13 @@ def build(c, res, al):
     body = open(os.path.join(web, 'page_body.html'), encoding='utf-8').read()
     html = head + body.replace('<script src="data.js"></script>', '<script>const DATA=' + json.dumps(D, ensure_ascii=False, separators=(',', ':')) + ';</script>')
     out = os.path.join(root, 'dashboard.html'); open(out, 'w', encoding='utf-8').write(html)
+    # state for the program (bim serve): one row per bridge, judgement without the series (series come from history.sqlite)
+    st = []
+    for o, x in zip(res, lst):
+        r = dict(x.get('r') or {}); r.pop('ts', None); y = dict(x); y['r'] = r if x.get('r') else None
+        y['tracks'] = o['tracks']; y['agree'] = o['agree']; g = o['bridge'].get('reg') or {}
+        y.update(org=g.get('org'), tel=g.get('tel'), road=g.get('road'), route=g.get('route'), geo=o['bridge'].get('geo'))
+        st.append(y)
+    json.dump(dict(title=c['title'], name=c['name'], made=al.get('made'), bridges=st), open(os.path.join(root, 'state.json'), 'w', encoding='utf-8'),
+              ensure_ascii=False, separators=(',', ':'))
     return out

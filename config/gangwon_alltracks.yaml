@@ -1,4 +1,4 @@
-# 강원특별자치도 전체, Sentinel-1 모든 궤도 (상승 54번은 별도 실행분이 있어 여기서는 나머지 궤도)
+# 강원특별자치도 전체, Sentinel-1 모든 궤도. 상승 54번은 먼저 시작한 처리기(external)의 결과를 그대로 수집합니다.
 # 하강 궤도는 2022-2024 촬영 공백 때문에 두 기간으로 나눠 각각 기준일을 둡니다.
 name: gangwon
 title: 강원특별자치도
@@ -7,6 +7,7 @@ min_length_m: 0
 start: '2018-06-01'
 boundaries: data/gangwon_muni.geojson
 tracks:
+  - {dir: ASCENDING, path: 54, utc: '09:23', reference_date: '20220325', external: true, data_dir: /mnt/e/InSAR_DATA/gw, work_dir: /home/insar/gw}
   - {dir: ASCENDING, path: 127, utc: '09:32'}
   - {dir: DESCENDING, path: 61, utc: '21:23', start: '2018-06-01', end: '2021-12-31', tag: '_2018'}
   - {dir: DESCENDING, path: 61, utc: '21:23', start: '2025-01-01', tag: '_2025'}

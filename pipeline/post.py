@@ -72,8 +72,10 @@ def proxy(b, br, s, c, Lb, Wb):
         m = okY & (np.abs(c) <= 50) & (sgn * s >= Lb / 2 + 10) & (sgn * s <= Lb / 2 + 200)
         if m.sum() < 1: continue
         yz = np.nanmedian(Y[m], axis=0) - Yr; vz, sz = vel(yz, se=True); thr = max(2 * sig_r, 2 * sz)
-        sg = bool(abs(vz) > thr); ends.append(dict(end='시점' if sgn < 0 else '종점', n=int(m.sum()), v=round(vz, 2), sig=sg))
+        sg = bool(abs(vz) > thr); ends.append(dict(end='시점' if sgn < 0 else '종점', n=int(m.sum()), v=round(vz, 2), sig=sg, _y=yz))
     if not ends: return False
+    ym = np.nanmean([e_.pop('_y') for e_ in ends], axis=0); rnd = lambda a_: [None if not np.isfinite(x) else round(float(x), 1) for x in a_]
+    pts = dict(ts=rnd(ym), ts_vert=rnd(ym), ts_los=rnd(ym * COS), inc=round(float(inc), 2))
     rg = br.get('reg') or {}; typ = rg.get('type') or ''; cls = rg.get('cls') or '기타'
     Tobs = float(t.max() - t.min())
     Dn = max((abs(e['v']) * Tobs if e['sig'] else 0.0) for e in ends); D10 = max((abs(e['v']) * (Tobs + PROJ_Y) if e['sig'] else 0.0) for e in ends)
@@ -83,7 +85,7 @@ def proxy(b, br, s, c, Lb, Wb):
     r_now = max(Dn / S_ALLOW, bn / bet); r_10 = max(D10 / S_ALLOW, b10 / bet); th = RTH.get(cls, RTH['기타'])
     lnow = rlev(r_now, th); level = max(lnow, min(rlev(r_10, th), lnow + 1))
     b.update(level=int(level), st=LV[level], conf='낮음', proxy=True, items={'V': None, 'ACC': None, 'DIFF': None, 'CUM': None}, lv={}, sig={},
-             kT_med=None, std_raw=None, std_corr=None, ts=[None] * len(t), v_nodes=[], where={},
+             kT_med=None, std_raw=None, std_corr=None, v_nodes=[], where={}, **pts,
              allow=dict(cls=cls, type=typ or '미상', span=span, beta_allow=bet, S_allow=S_ALLOW, Tobs=round(Tobs, 1), D_now=round(Dn, 1), D_10y=round(D10, 1),
                         beta_now=round(bn, 6), beta_10y=round(b10, 6), r_now=round(r_now, 3), r_10y=round(r_10, 3), th=th, zones=ends, review=True,
                         note='교량 본체 산란체 없음 → 교대부(양 끝 10~200 m) 지반 거동으로 대체 판정 (참고)', year=rg.get('year'), grade=rg.get('grade'), insp=rg.get('insp')))
@@ -200,10 +202,18 @@ for br in tile['bridges']:
     raw_sd = [np.nanstd(n - AT[:, :2] @ np.linalg.lstsq(AT[np.isfinite(n)], n[np.isfinite(n)], rcond=None)[0][:2]) for n in nodes if n is not None]
     cor_sd = [np.nanstd(Yc[i] - AS[:, :2] @ np.linalg.lstsq(AS[np.isfinite(Yc[i])][:, :2], Yc[i][np.isfinite(Yc[i])], rcond=None)[0]) for i in np.where(ok)[0]]
     mean_ts = np.nanmean(Yc[ok], axis=0)
+    # series for the program: bridge mean relative to the surrounding ground ring
+    #   ts_los   : LOS [mm] (raw, before vertical conversion and thermal correction)
+    #   ts_vert  : vertical [mm] = LOS / cos(incidence), before thermal correction
+    #   ts       : vertical [mm] after thermal-expansion correction (used for the judgement)
+    raw_mean = np.nanmean(np.array([n for n in nodes if n is not None]), axis=0)
+    rnd = lambda a: [None if not np.isfinite(x) else round(float(x), 1) for x in a]
+    b['ts_vert'] = rnd(raw_mean - gts); b['ts_los'] = rnd((raw_mean - gts) * COS); b['inc'] = round(float(inc), 2)
+    b['zone_ts'] = [dict(s=z['s'], ts=rnd(np.nanmean(Yc[(np.abs(ns - z['s']) <= max(4.5, span / 4)) & ok], axis=0) - gts)) for z in zz] if 'zz' in dir() else []
     b.update(level=int(level), st=LV[level], conf=conf, items={k: (round(float(v), 2) if np.isfinite(v) else None) for k, v in items.items()}, lv=lv, sig=sig, segs=sv,
              where=dict(V=V['s0'], ACC=A_['s0'] if A_ else None, DIFF=Dw), kT_med=round(float(np.nanmedian(kT)), 3),
              std_raw=round(float(np.median(raw_sd)), 2), std_corr=round(float(np.median(cor_sd)), 2),
-             v_nodes=[None if not np.isfinite(x) else round(float(x), 2) for x in vn], ts=[None if not np.isfinite(x) else round(float(x), 1) for x in mean_ts])
+             v_nodes=[None if not np.isfinite(x) else round(float(x), 2) for x in vn], ts=[None if not np.isfinite(x) else round(float(x), 1) for x in (mean_ts - gts)])
     out['bridges'].append(b)
 out['dates'] = dates; out['inc'] = round(inc, 2); out['cell'] = os.path.basename(cell)
 os.makedirs(E + '/res', exist_ok=True)

@@ -33,6 +33,7 @@ def prepare(c):
 
 def run_track(c, tr, tl, aoi, log, download_only=False):
     key, data, work = C.track_dirs(c, tr); env = C.env(c, tr)
+    if tr.get('external'): return []   # processed by another runner (results only collected here)
     json.dump(tl, open(os.path.join(data, 'tiles.json'), 'w'), ensure_ascii=False)
     slc = os.path.join(c['paths']['data'], 'slc', key); orb = c['paths']['orbits']
     from shapely import wkt as W
@@ -41,9 +42,10 @@ def run_track(c, tr, tl, aoi, log, download_only=False):
     t0, t1 = tr.get('start', c.get('start', '2018-06-01')), tr.get('end')
     dates = TR.available_dates(aoi, tr['path'], t0, t1)
     gj = os.path.join(c['paths']['data'], c['name'], 'aoi.geojson')
-    if not os.path.exists(gj):
+    if not os.path.exists(gj) or json.load(open(gj))['features'][0]['geometry']['type'] != 'Polygon':
         from shapely.geometry import mapping
-        json.dump(dict(type='FeatureCollection', features=[dict(type='Feature', properties={}, geometry=mapping(W.loads(aoi)))]), open(gj, 'w'))
+        # burst2stack accepts a single Polygon: convex hull of the tile windows (every bridge inside; some burst area without bridges)
+        json.dump(dict(type='FeatureCollection', features=[dict(type='Feature', properties={}, geometry=mapping(W.loads(aoi).convex_hull))]), open(gj, 'w'))
     new = download.update(env, gj, tr['path'], dates, slc, orb, os.path.join(data, 'download.log'))
     weather.fetch(tl, tr['utc'], os.path.join(data, 'temps'), start=t0, end=t1)
     if download_only: return new
@@ -88,6 +90,8 @@ def run(c, download_only=False):
         news[C.track_dirs(c, tr)[0]] = run_track(c, tr, tl, aoi, log, download_only)
     if download_only: return dict(new_dates=news)
     res = collect.collect(c, brs, trs)
+    from . import health
+    health.check(c, trs)
     al = alerts.make(c, res)
     report.build(c, res, al)
     return dict(new_dates=news, bridges=len(brs), alerts=len(al['alerts']))

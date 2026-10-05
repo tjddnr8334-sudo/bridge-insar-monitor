@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>교량 InSAR 감시</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root{--bg:#f3f5f7;--panel:#fff;--ink:#18232f;--muted:#5d6b78;--line:#d6dde4;--ok:#2e8b57;--watch:#b9a400;--warn:#d18a00;--bad:#c8372d;--none:#9aa6b2;--accent:#1f4e79}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px "Noto Sans KR",system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+h1{font-size:17px;margin:0}.sub{color:var(--muted);font-size:12px}.mono{font-family:ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;color:#fff;font-size:11.5px;white-space:nowrap}
+.counts{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+main{display:grid;grid-template-columns:320px minmax(0,1fr) 430px;gap:10px;padding:10px;height:calc(100vh - 58px)}
+@media (max-width:1100px){main{grid-template-columns:1fr;height:auto}#map{height:420px}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto}
+#map{border-radius:8px;border:1px solid var(--line);min-height:300px}
+.tabs{display:flex;gap:4px;margin-bottom:8px}.tabs button{flex:1;border:1px solid var(--line);background:var(--bg);padding:6px;border-radius:6px;cursor:pointer;font:inherit}
+.tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.item{display:block;width:100%;text-align:left;border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:7px 9px;margin-bottom:6px;cursor:pointer;font:inherit;color:inherit}
+.item:hover{border-color:var(--accent)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}td,th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:500}
+.kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:8px 0}.kv div{border:1px solid var(--line);border-radius:6px;padding:6px 8px}.kv b{display:block;font-size:15px}.kv span{font-size:11px;color:var(--muted)}
+.seg{display:flex;gap:4px;margin:6px 0}.seg button{border:1px solid var(--line);background:var(--bg);border-radius:5px;padding:3px 8px;cursor:pointer;font:inherit;font-size:12px}.seg button.on{background:var(--ink);color:#fff}
+svg text{font-size:10px;fill:var(--muted)}.note{font-size:12px;color:var(--muted)}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}.filters select,.filters input{font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:5px}
+</style>
+</head>
+<body>
+<header><h1 id="title">교량 InSAR 감시</h1><span class="sub" id="made"></span><div class="counts" id="counts"></div></header>
+<main>
+  <section class="card">
+    <div class="tabs"><button id="tA" class="on">교량 알람</button><button id="tE">처리 오류</button><button id="tL">교량 목록</button></div>
+    <div id="left"></div>
+  </section>
+  <div id="map"></div>
+  <section class="card" id="detail"><p class="sub">지도나 목록에서 교량을 고르면 판정 근거와 변위 시계열이 나옵니다.</p></section>
+</main>
+<script>
+const COL={'정상':'var(--ok)','관심':'var(--watch)','주의':'var(--warn)','경고':'var(--bad)','판정 불가':'var(--none)','미처리':'#c9d1d9'};
+const LVN=['정상','관심','주의','경고'];
+const st=l=>l===null||l===undefined?'미처리':(l<0?'판정 불가':LVN[l]);
+const pill=s=>`<span class="pill" style="background:${COL[s]}">${s}</span>`;
+const $=s=>document.querySelector(s); const J=u=>fetch(u).then(r=>r.json());
+let BR=[], AL={alerts:[]}, HE={events:[]}, tab='A', map, layer, kind='vert_tc';
+async function boot(){
+  const [S,B,A,H]=await Promise.all([J('/api/summary'),J('/api/bridges'),J('/api/alerts'),J('/api/health')]); BR=B; AL=A; HE=H;
+  $('#title').textContent=S.title+' 교량 InSAR 감시'; document.title=S.title+' 교량 InSAR 감시';
+  $('#made').textContent=`마지막 판정 ${S.made||'-'} · 교량 ${S.n.toLocaleString()}개 · 궤도 ${(S.tracks||[]).map(t=>t.dir[0]+t.path+(t.tag||'')).join(', ')}`;
+  $('#counts').innerHTML=['경고','주의','관심','정상','판정 불가','미처리'].map(k=>`${pill(k)} <span class="mono">${(S.counts[k]||0).toLocaleString()}</span>`).join(' ')+
+    ` &nbsp;<span class="sub">처리 오류 ${S.n_errors}건</span>`;
+  map=L.map('map'); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(map);
+  layer=L.layerGroup().addTo(map); const pts=[];
+  BR.forEach(b=>{ const s=st(b.lv); const r=b.lv>=2?7:b.lv===1?5:3.5; pts.push([b.lat,b.lon]);
+    L.circleMarker([b.lat,b.lon],{radius:r,color:'#fff',weight:1,fillColor:getComputedStyle(document.body).getPropertyValue(COL[s].slice(4,-1))||'#999',fillOpacity:.9})
+     .bindTooltip(`${b.n} (${s})`).on('click',()=>show(b.id)).addTo(layer); });
+  if(pts.length) map.fitBounds(pts,{padding:[20,20]});
+  ['A','E','L'].forEach(k=>$('#t'+k).onclick=()=>{tab=k; ['A','E','L'].forEach(x=>$('#t'+x).classList.toggle('on',x===k)); left();}); left();
+}
+function left(){
+  if(tab==='A'){ const a=AL.alerts;
+    $('#left').innerHTML=(a.length?'':'<p class="sub">이번 주기에 확인이 필요한 교량이 없습니다.</p>')+a.map(x=>`<button class="item" data-id="${x.id}">${pill(x.status)} <b>${x.name}</b> <span class="sub">${x.kind}</span><br>
+      <span class="sub">${x.city} · ${x.cls||''} ${x.type||''} · 허용변위 대비 ${Math.round(100*(x.ratio_now||0))} % (10년 ${Math.round(100*(x.ratio_proj||0))} %)${x.proxy?' · 교대부 대체':''}</span></button>`).join('');
+  } else if(tab==='E'){ const e=HE.events;
+    $('#left').innerHTML=`<p class="sub">점검 ${HE.checked||'-'}</p>`+(e.length?'':'<p class="sub">처리 오류가 없습니다.</p>')+e.map(x=>`<div class="item">${pill(x.level==='경고'?'경고':x.level==='주의'?'주의':'관심')} <b>${x.kind}</b> <span class="sub">${x.track||''}</span><br><span>${x.msg}</span></div>`).join('');
+  } else { const cs=[...new Set(BR.map(b=>b.c))].sort();
+    $('#left').innerHTML=`<div class="filters"><select id="fc"><option value="">전체 시·군</option>${cs.map(c=>`<option>${c}</option>`).join('')}</select>
+      <select id="fl"><option value="">전체 등급</option>${['경고','주의','관심','정상','판정 불가','미처리'].map(s=>`<option>${s}</option>`).join('')}</select><input id="fq" placeholder="교량명"></div><div id="lst"></div>`;
+    const fill=()=>{ const c=$('#fc').value,l=$('#fl').value,q=$('#fq').value.trim();
+      const r=BR.filter(b=>(!c||b.c===c)&&(!l||st(b.lv)===l)&&(!q||b.n.includes(q))).sort((a,b)=>(b.lv??-2)-(a.lv??-2)||(b.rn||0)-(a.rn||0)).slice(0,400);
+      $('#lst').innerHTML=`<p class="sub">${r.length}개 표시</p>`+r.map(b=>`<button class="item" data-id="${b.id}">${pill(st(b.lv))} ${b.n} <span class="sub">${b.c} · ${b.cls||''} · ${b.len} m${b.rn!=null?' · '+Math.round(b.rn*100)+' %':''}</span></button>`).join('');
+      bind(); };
+    ['#fc','#fl','#fq'].forEach(s=>$(s).addEventListener('input',fill)); fill(); }
+  bind();
+}
+function bind(){ document.querySelectorAll('[data-id]').forEach(el=>el.onclick=()=>show(el.dataset.id)); }
+async function show(id){
+  const [b,S]=await Promise.all([J('/api/bridge?id='+id),J('/api/series?id='+id)]); const r=b.r;
+  map.setView([b.lat,b.lon],15);
+  let h=`<h2 style="margin:0 0 4px;font-size:16px">${b.n} ${pill(st(r?r.lv:null))}</h2><p class="sub">${b.c} · ${b.cls||'종별 미상'} · ${b.t||'형식 미상'} · 연장 ${b.len} m · ${b.yr||'?'}년 준공 · 안전점검 ${b.gr||'-'} (${b.ins||''})<br>관리 ${b.org||'-'} ${b.tel||''}</p>`;
+  if(!r){ h+='<p class="note">아직 처리되지 않은 교량입니다 (구역 정합 대기).</p>'; }
+  else if(r.lv<0){ h+=`<p class="note">판정 불가: ${r.why||''}</p>`; }
+  else { h+=`<div class="kv"><div><b class="mono">${r.dn??'-'} mm</b><span>누적 수직변위 (주변 지반 대비, ${r.tob}년)</span></div><div><b class="mono">${r.rn!=null?Math.round(r.rn*100)+' %':'-'}</b><span>허용변위 대비 (10년 예측 ${r.r10!=null?Math.round(r.r10*100)+' %':'-'})</span></div>
+      <div><b class="mono">${r.nps}</b><span>교량 위 PS · 노드 확보 ${Math.round((r.cov||0)*100)} %</span></div><div><b>${r.conf||'-'}${r.rv?' · 확인 필요':''}</b><span>신뢰도</span></div></div>
+      <p class="note">허용 총침하 ${r.sa} mm · 허용 각변위 ${(r.ba*1000).toFixed(1)} ‰ (경간 ${r.sp} m 가정, ${r.typ}) · 사용 영상 ${r.q?r.q[1]+'/'+r.q[0]:'-'} · 기온 계수 ${r.kT??'-'} mm/°C${r.nt?' · '+r.nt:''}</p>`; }
+  const tr=b.tracks||{}; if(Object.keys(tr).length) h+=`<table><tr><th>궤도</th><th>판정</th><th>교량 위 PS</th><th>비율</th></tr>${Object.entries(tr).map(([k,v])=>`<tr><td class="mono">${k}</td><td>${pill(st(v.level))}${v.proxy?' <span class="sub">교대부</span>':''}</td><td class="mono">${v.n_ps??'-'}</td><td class="mono">${v.r_now!=null?Math.round(v.r_now*100)+' %':'-'}</td></tr>`).join('')}</table>${b.agree===false?'<p class="note">궤도 간 판정이 다릅니다 — 현장 확인 권장.</p>':''}`;
+  h+=`<h3 style="font-size:14px;margin:12px 0 4px">변위 시계열 (주변 지반 대비)</h3><div class="seg">${[['los','LOS'],['vert','수직'],['vert_tc','수직 (열 신축 보정)']].map(([k,n])=>`<button data-k="${k}" class="${k===kind?'on':''}">${n}</button>`).join('')}</div><div id="chart"></div>
+     <p class="note">LOS는 위성 시선방향 변위, 수직은 LOS ÷ cos(입사각) 환산값입니다. 점 하나가 Sentinel-1 촬영 한 번이며, 새 영상이 정합될 때마다 자동으로 늘어납니다.</p>`;
+  $('#detail').innerHTML=h;
+  document.querySelectorAll('.seg button').forEach(x=>x.onclick=()=>{kind=x.dataset.k; document.querySelectorAll('.seg button').forEach(y=>y.classList.toggle('on',y===x)); chart(S);});
+  chart(S);
+}
+function chart(S){
+  const W=Math.min(410,$('#detail').clientWidth-10),H=230,m={l:42,r:8,t:10,b:22}; const pal=['#1f4e79','#c8372d','#2e8b57','#d18a00','#6b4fa0','#4a8fa8','#8a6f48'];
+  const ser=Object.entries(S).map(([t,v])=>[t,(v[kind]||[]).map(([d,y])=>[new Date(+d.slice(0,4),+d.slice(4,6)-1,+d.slice(6)),y])]).filter(x=>x[1].length);
+  if(!ser.length){ $('#chart').innerHTML='<p class="note">시계열이 없습니다.</p>'; return; }
+  const all=ser.flatMap(s=>s[1]); const x0=Math.min(...all.map(p=>p[0])),x1=Math.max(...all.map(p=>p[0])); let y0=Math.min(...all.map(p=>p[1])),y1=Math.max(...all.map(p=>p[1])); const pad=(y1-y0)*.08||1; y0-=pad; y1+=pad;
+  const X=t=>m.l+(t-x0)/(x1-x0||1)*(W-m.l-m.r), Y=v=>H-m.b-(v-y0)/(y1-y0)*(H-m.t-m.b);
+  let g=`<svg width="${W}" height="${H}">`; for(let k=0;k<=4;k++){const v=y0+(y1-y0)*k/4; g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="#e3e8ed"/><text x="${m.l-4}" y="${Y(v)+3}" text-anchor="end">${v.toFixed(1)}</text>`;}
+  for(let yr=new Date(x0).getFullYear()+1;yr<=new Date(x1).getFullYear();yr++){const t=new Date(yr,0,1); g+=`<text x="${X(t)}" y="${H-6}" text-anchor="middle">${yr}</text>`;}
+  g+=`<text x="4" y="${m.t+4}">mm</text>`;
+  ser.forEach(([t,p],i)=>{ g+=`<polyline fill="none" stroke="${pal[i%7]}" stroke-width="1.2" points="${p.map(q=>X(q[0]).toFixed(1)+','+Y(q[1]).toFixed(1)).join(' ')}"/>`+p.map(q=>`<circle cx="${X(q[0]).toFixed(1)}" cy="${Y(q[1]).toFixed(1)}" r="1.6" fill="${pal[i%7]}"/>`).join(''); });
+  g+='</svg>'+ser.map(([t],i)=>`<span class="sub" style="color:${pal[i%7]}">● ${t}</span>`).join(' &nbsp;');
+  $('#chart').innerHTML=g;
+}
+boot();
+</script>
+</body>
+</html>
