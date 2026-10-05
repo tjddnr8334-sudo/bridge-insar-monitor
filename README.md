@@ -28,7 +28,7 @@ python -m bim status --config config/gangneung.yaml
 | PS 추출 | StaMPS (산악지 적응형 후보 선정: 날짜별 진폭 보정, 적설기 제외, 적응 임계값) | `pipeline/tile.sh`, `pipeline/prep_stamps.py`, `pipeline/stamps.sh` |
 | 품질 필터 | 수직 기선 200 m 초과 제외, 기준점 결맞음 0.95 (부족 시 0.92→0.80 단계 완화·표시), 시기별 기준점 결맞음 | `pipeline/qc_filter.py` |
 | 열 신축 보정 | 노드별 기온 계수 추정 후 제거 | `pipeline/post.py` |
-| 판정 | 주변 지반 대비 누적 수직변위 / 허용 총침하, 인접 지점 부등변위 / 허용 각변위, 종별 기준, 10년 예측 | `pipeline/post.py`, `config/criteria.yaml` |
+| 판정 | 주변 지반 대비 누적 수직변위 / 허용 총침하 25 mm, 인접 지점 부등변위 / 허용 각변위 1/500 (inframon 기준), 종별 기준, 10년 예측 | `pipeline/post.py`, `config/criteria.yaml` |
 | 보강 | 교량 위 점이 부족한 교량: Capon·APES 2배 재초점 + DS 위상연결, 그래도 없으면 교대부 대체 판정 | `pipeline/second.sh`, `pipeline/refocus.py`, `pipeline/merge2.py` |
 | 결과 | 궤도별 결과 통합, SQLite 이력, 알림, 대시보드 | `bim/collect.py`, `bim/alerts.py`, `bim/report.py` |
 

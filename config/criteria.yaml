@@ -5,11 +5,11 @@ quality:
   ref_date_coherence: 0.95    # per-date phase coherence of the reference cluster (drop dates below; follows the ladder value)
   da_standard: 0.42           # amplitude dispersion for PS candidates; adaptive (best 12 %, <= 0.70) when < 1500 candidates
 ground_ring_m: [30, 300]      # surrounding ground used as the local reference and as the noise level (2 x MAD)
-allowable:
-  total_settlement_mm: 50     # tolerable total bridge settlement (FHWA / AASHTO tolerable-movement studies)
-  angular_distortion:          # adjacent-support differential settlement / span (AASHTO LRFD 10.5.2.2)
-    continuous: 0.004
-    simple: 0.008
+allowable:                     # unified with inframon life.limits.DEFAULTS (settlement 25 mm, angular distortion 1/500)
+  total_settlement_mm: 25     # 교각·교대 절대 침하 허용치 — inframon life.limits 'settlement_mm'
+  angular_distortion:          # 인접 지점 부등침하 / 경간 — inframon life.limits 'angular_distortion' = 1/500 (all types)
+    continuous: 0.002
+    simple: 0.002
   continuous_types: [라멘교, PSC박스거더교, 강박스거더교, 사장교, 현수교, 아치교, 트러스교]
   typical_span_m:              # used when the registry has no span: capped by the bridge length
     RC슬래브교: 10

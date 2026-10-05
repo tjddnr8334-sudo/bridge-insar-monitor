@@ -17,12 +17,12 @@ LV = ['정상', '관심', '주의', '경고']
 # ---- allowable displacement (InSAR = displacement since the first acquisition, relative to the surrounding ground)
 import yaml
 _CR = yaml.safe_load(open(os.environ['BIM_CRITERIA'], encoding='utf-8')) if os.environ.get('BIM_CRITERIA') else None
-S_ALLOW = float(_CR['allowable']['total_settlement_mm']) if _CR else 50.0   # mm, tolerable total settlement (FHWA / AASHTO)
+S_ALLOW = float(_CR['allowable']['total_settlement_mm']) if _CR else 25.0   # mm, inframon life.limits settlement_mm
 SPAN = dict(_CR['allowable']['typical_span_m']) if _CR else {'RC슬래브교': 10, '라멘교': 15, 'PSCI거더교': 30, 'PSC박스거더교': 50, '강박스거더교': 45, 'default': 25}
 SPAN_DEF = SPAN.pop('default', 25)
 CONT = set(_CR['allowable']['continuous_types']) if _CR else {'라멘교', 'PSC박스거더교', '강박스거더교', '사장교', '현수교', '아치교', '트러스교'}
-BETA_C = _CR['allowable']['angular_distortion']['continuous'] if _CR else 0.004
-BETA_S = _CR['allowable']['angular_distortion']['simple'] if _CR else 0.008
+BETA_C = _CR["allowable"]["angular_distortion"]["continuous"] if _CR else 0.002
+BETA_S = _CR['allowable']['angular_distortion']['simple'] if _CR else 0.002
 RTH = dict(_CR['ratio_thresholds']) if _CR else {'1종': [0.3, 0.5, 0.7], '2종': [0.4, 0.6, 0.8], '3종': [0.5, 0.7, 0.9], '기타': [0.5, 0.7, 0.9]}
 PROJ_Y = float(_CR['projection_years']) if _CR else 10.0
 def rlev(r, th): return 3 if r >= th[2] else 2 if r >= th[1] else 1 if r >= th[0] else 0

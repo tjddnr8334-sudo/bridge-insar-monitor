@@ -35,13 +35,16 @@ def fetch_orbit(env, date, mission, orbit_dir, log):
 
 
 def update(env, aoi_bounds, path, dates, slc_dir, orbit_dir, log):
-    """Download every listed date not yet present; returns the new dates."""
+    """Download every listed date not yet present (BIM_DL_WORKERS in parallel, default 3); returns the new dates."""
     os.makedirs(slc_dir, exist_ok=True); os.makedirs(orbit_dir, exist_ok=True)
-    have = have_dates(slc_dir); new = []
-    for d in dates:
-        if d in have: continue
-        if fetch_date(env, aoi_bounds, path, d, slc_dir, log):
-            new.append(d)
-            for s in glob.glob(os.path.join(slc_dir, 'S1*%s*.SAFE' % d)):
-                fetch_orbit(env, d, os.path.basename(s)[:3], orbit_dir, log)
-    return new
+    have = have_dates(slc_dir); todo = [d for d in dates if d not in have]
+
+    def one(d):   # download is network-bound: a few dates in parallel (each in its own tmp_<date> folder)
+        if not fetch_date(env, aoi_bounds, path, d, slc_dir, log): return None
+        for s in glob.glob(os.path.join(slc_dir, 'S1*%s*.SAFE' % d)):
+            fetch_orbit(env, d, os.path.basename(s)[:3], orbit_dir, log)
+        return d
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=int(env.get('BIM_DL_WORKERS', '3'))) as ex:
+        new = [d for d in ex.map(one, todo) if d]
+    return sorted(new)
