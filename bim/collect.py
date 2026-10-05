@@ -24,7 +24,8 @@ def collect(c, brs, trs):
             for b in r['bridges']:
                 bid = b['id'] if b['id'] in ids else byname.get((b.get('n'), round(b.get('lat', 0), 4), round(b.get('lon', 0), 4)))
                 if bid is None: continue
-                b = dict(b, id=bid, track=key, dates=r.get('dates'), qc=r.get('qc'))
+                b = dict(b, id=bid, track=key, dates=r.get('dates'), qc=r.get('qc'), tile=r.get('tile'),
+                         npz=os.path.join(data, 'exports', '%s_stamps_qc.npz' % r.get('tile')), inc=b.get('inc') or r.get('inc'))
                 per.setdefault(bid, []).append(b)
     out = []
     for br in brs:

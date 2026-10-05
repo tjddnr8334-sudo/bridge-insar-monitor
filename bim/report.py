@@ -9,6 +9,7 @@ KEYS = ['V', 'ACC', 'DIFF', 'CUM']
 
 def entry(b):
     e = dict(len=b['len'], w=b.get('width'), nps=b.get('n_ps', 0), cov=b.get('node_cover', 0), lv=b['level'], trk=b['track'])
+    e.update(tile=b.get('tile'), npz=b.get('npz') if b.get('npz') and os.path.exists(b['npz']) else None, inc=b.get('inc'))
     if b['level'] < 0:
         e['why'] = b.get('reason', ''); return e
     it = b.get('items') or {}; e['it'] = [it.get(k) for k in KEYS]; e['sg'] = [1 if (b.get('sig') or {}).get(k, True) else 0 for k in KEYS]
