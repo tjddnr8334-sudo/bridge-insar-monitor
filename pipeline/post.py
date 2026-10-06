@@ -168,14 +168,27 @@ for br in tile['bridges']:
     gts = np.nanmedian(Y[gm], axis=0) if G is not None else np.zeros(len(t))       # ground series of the ring (removed: relative motion)
     Tobs = float(t.max() - t.min()); vthr = 2 * G['v_sig'] if G is not None else None
     sup = np.arange(-Lb / 2, Lb / 2 + 1e-6, span); sup = sup if len(sup) >= 2 else np.array([-Lb / 2, Lb / 2])
+    # data gaps: acquisitions used vs expected (12-day revisit), longest gap, staleness -> inflate the uncertainty
+    dd = np.array([datetime.datetime.strptime(d, '%Y%m%d') for d in dates]); gaps_d = np.diff(dd).astype('timedelta64[D]').astype(int) if len(dd) > 1 else np.array([0])
+    n_exp = Tobs * 365.25 / 12.0 + 1; cover = len(dates) / max(n_exp, 1)
+    stale = (datetime.datetime.now() - dd[-1]).days if len(dd) else 9999
+    gap_inflate = float(np.sqrt(max(1.0, 1.0 / max(cover, 0.05))))
+    gap_info = dict(n_used=len(dates), n_expected=int(round(n_exp)), coverage=round(cover, 2), max_gap_days=int(gaps_d.max()),
+                    last_date=dates[-1], stale_days=int(stale), flag=bool(cover < 0.6 or gaps_d.max() > 365 or stale > 60))
+    Yraw = np.array([n if n is not None else np.full(len(t), np.nan) for n in nodes])
     zones = []
     for x in sup:
         k = (np.abs(ns - x) <= max(4.5, span / 4)) & np.array([np.isfinite(r_).any() for r_ in Yc])
         if not k.any(): zones.append(None); continue
         yz = np.nanmean(Yc[k], axis=0) - gts; vz, sz = vel(yz, se=True)
+        yr = np.nanmean(Yraw[k], axis=0) - gts; vr = vel(yr)                 # same zone without thermal correction
         thr = max(vthr, 2 * sz) if vthr is not None else 2 * sz
         sigz = bool(np.isfinite(vz) and abs(vz) > thr)
-        zones.append(dict(s=round(float(x), 1), v=round(vz, 2), sig=sigz, D=round(abs(vz) * Tobs, 1) if sigz else 0.0, D10=round(abs(vz) * (Tobs + PROJ_Y), 1) if sigz else 0.0))
+        # 1-sigma of the zone velocity: trend standard error (+) uncertainty of the ground reference median
+        sv = float(np.hypot(sz, (G['v_sig'] / np.sqrt(max(G['n'], 1))) if G is not None else 0.0)) * gap_inflate
+        zones.append(dict(s=round(float(x), 1), v=round(vz, 2), sig=sigz, D=round(abs(vz) * Tobs, 1) if sigz else 0.0,
+                          D10=round(abs(vz) * (Tobs + PROJ_Y), 1) if sigz else 0.0, sv=round(sv, 3),
+                          dT=round(abs(vz - vr) * Tobs, 1) if np.isfinite(vr) else 0.0))
     zz = [z for z in zones if z]
     if not zz:
         if not proxy(b, br, s, c, Lb, Wb): finish(b, '지점부·교대부 산란체 없음')
@@ -190,10 +203,27 @@ for br in tile['bridges']:
         if x > bn: bn, bw = x, (z0['s'], z1['s'])
         b10 = max(b10, x10)
     r_now = max(Dn / S_ALLOW, bn / bet); r_10 = max(D10 / S_ALLOW, b10 / bet)
+    # uncertainty band (2 sigma) + thermal-correction sensitivity (ERA5 0.25 deg air temperature is not the deck temperature)
+    def band(sign):
+        D_ = 0.0; B_ = 0.0
+        for z in zz:
+            d_ = abs(z['v']) * Tobs + sign * (2 * z['sv'] * Tobs + z['dT'])
+            D_ = max(D_, max(d_, 0.0))
+        for k_ in range(len(zones) - 1):
+            z0_, z1_ = zones[k_], zones[k_ + 1]
+            if not (z0_ and z1_): continue
+            dv_ = abs(z1_['v'] - z0_['v']) + sign * 2 * float(np.hypot(z0_['sv'], z1_['sv']))
+            B_ = max(B_, max(dv_, 0.0) * Tobs / 1000.0 / span)
+        return D_, B_
+    D_lo, B_lo = band(-1); D_hi, B_hi = band(+1)
+    r_lo = max(D_lo / S_ALLOW, B_lo / bet); r_hi = max(D_hi / S_ALLOW, B_hi / bet)
+    T_eff = max((z['dT'] for z in zz), default=0.0)
     th = RTH.get(cls, RTH['기타']); lnow = rlev(r_now, th); level = max(lnow, min(rlev(r_10, th), lnow + 1))
-    review = bool(level >= 2 and (on.sum() < 5 or cov < 0.25 or G is None))
+    th_ = RTH.get(cls, RTH['기타']); uncertain = rlev(r_lo, th_) != rlev(r_hi, th_)
+    review = bool(level >= 2 and (on.sum() < 5 or cov < 0.25 or G is None or uncertain or gap_info['flag']))
     b['allow'] = dict(cls=cls, type=typ or '미상', span=span, beta_allow=bet, S_allow=S_ALLOW, Tobs=round(Tobs, 1), D_now=round(Dn, 1), D_10y=round(D10, 1),
                       beta_now=round(bn, 6), beta_10y=round(b10, 6), beta_where=bw, r_now=round(r_now, 3), r_10y=round(r_10, 3), th=th, zones=zones, review=review,
+                      r_lo=round(r_lo, 3), r_hi=round(r_hi, 3), D_lo=round(D_lo, 1), D_hi=round(D_hi, 1), thermal_mm=round(T_eff, 1), uncertain=bool(uncertain), gaps=gap_info,
                       year=rg.get('year'), grade=rg.get('grade'), insp=rg.get('insp'))
     if Lb < 20: b['allow']['note'] = '연장 20 m 미만: Sentinel-1 해상도 한계 (참고)'
     conf = '높음' if cov >= 0.5 else '보통' if cov >= 0.25 else '낮음'

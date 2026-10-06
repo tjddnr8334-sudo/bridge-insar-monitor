@@ -24,6 +24,8 @@ def entry(b):
     if a:
         e.update(rn=a['r_now'], r10=a['r_10y'], cls=a['cls'], typ=a['type'], dn=a['D_now'], d10=a['D_10y'], sa=a['S_allow'], bn=a['beta_now'], b10=a['beta_10y'],
                  ba=a['beta_allow'], sp=a['span'], tob=a['Tobs'], rv=a['review'], nt=a.get('note', ''))
+        e.update(rlo=a.get('r_lo'), rhi=a.get('r_hi'), dlo=a.get('D_lo'), dhi=a.get('D_hi'), tmm=a.get('thermal_mm'),
+                 unc=a.get('uncertain'), gaps=a.get('gaps'), zones=a.get('zones'))
     e['ts'] = b.get('ts'); e['dates'] = b.get('dates')
     return e
 
@@ -58,7 +60,8 @@ def build(c, res, al):
     for o, x in zip(res, lst):
         r = dict(x.get('r') or {}); r.pop('ts', None); y = dict(x); y['r'] = r if x.get('r') else None
         y['tracks'] = o['tracks']; y['agree'] = o['agree']; g = o['bridge'].get('reg') or {}
-        y.update(org=g.get('org'), tel=g.get('tel'), road=g.get('road'), route=g.get('route'), geo=o['bridge'].get('geo'))
+        y.update(org=g.get('org'), tel=g.get('tel'), road=g.get('road'), route=g.get('route'), geo=o['bridge'].get('geo'),
+                 h=g.get('h'), w=o['bridge'].get('width'))
         st.append(y)
     json.dump(dict(title=c['title'], name=c['name'], made=al.get('made'), bridges=st), open(os.path.join(root, 'state.json'), 'w', encoding='utf-8'),
               ensure_ascii=False, separators=(',', ':'))

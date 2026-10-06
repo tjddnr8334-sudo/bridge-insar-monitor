@@ -62,7 +62,7 @@ async function boot(){
 function left(){
   if(tab==='A'){ const a=AL.alerts;
     $('#left').innerHTML=(a.length?'':'<p class="sub">이번 주기에 확인이 필요한 교량이 없습니다.</p>')+a.map(x=>`<button class="item" data-id="${x.id}">${pill(x.status)} <b>${x.name}</b> <span class="sub">${x.kind}</span><br>
-      <span class="sub">${x.city} · ${x.cls||''} ${x.type||''} · 허용변위 대비 ${Math.round(100*(x.ratio_now||0))} % (10년 ${Math.round(100*(x.ratio_proj||0))} %)${x.proxy?' · 교대부 대체':''}</span></button>`).join('');
+      <span class="sub">${x.city} · ${x.cls||''} ${x.type||''} · 허용변위 대비 ${Math.round(100*(x.ratio_now||0))} %${x.ratio_lo!=null?` [${Math.round(100*x.ratio_lo)}–${Math.round(100*x.ratio_hi)}]`:''} (10년 ${Math.round(100*(x.ratio_proj||0))} %)${x.proxy?' · 교대부 대체':''}</span></button>`).join('');
   } else if(tab==='E'){ const e=HE.events;
     $('#left').innerHTML=`<p class="sub">점검 ${HE.checked||'-'}</p>`+(e.length?'':'<p class="sub">처리 오류가 없습니다.</p>')+e.map(x=>`<div class="item">${pill(x.level==='경고'?'경고':x.level==='주의'?'주의':'관심')} <b>${x.kind}</b> <span class="sub">${x.track||''}</span><br><span>${x.msg}</span></div>`).join('');
   } else { const cs=[...new Set(BR.map(b=>b.c))].sort();
@@ -82,8 +82,9 @@ async function show(id){
   let h=`<h2 style="margin:0 0 4px;font-size:16px">${b.n} ${pill(st(r?r.lv:null))}</h2><p class="sub">${b.c} · ${b.cls||'종별 미상'} · ${b.t||'형식 미상'} · 연장 ${b.len} m · ${b.yr||'?'}년 준공 · 안전점검 ${b.gr||'-'} (${b.ins||''})<br>관리 ${b.org||'-'} ${b.tel||''}</p>`;
   if(!r){ h+='<p class="note">아직 처리되지 않은 교량입니다 (구역 정합 대기).</p>'; }
   else if(r.lv<0){ h+=`<p class="note">판정 불가: ${r.why||''}</p>`; }
-  else { h+=`<div class="kv"><div><b class="mono">${r.dn??'-'} mm</b><span>누적 수직변위 (주변 지반 대비, ${r.tob}년)</span></div><div><b class="mono">${r.rn!=null?Math.round(r.rn*100)+' %':'-'}</b><span>허용변위 대비 (10년 예측 ${r.r10!=null?Math.round(r.r10*100)+' %':'-'})</span></div>
+  else { h+=`<div class="kv"><div><b class="mono">${r.dn??'-'} mm</b><span>누적 수직변위 (주변 지반 대비, ${r.tob}년)</span></div><div><b class="mono">${r.rn!=null?Math.round(r.rn*100)+' %':'-'}</b><span>허용변위 대비${r.rlo!=null?` (범위 ${Math.round(r.rlo*100)}–${Math.round(r.rhi*100)} %)`:''} · 10년 예측 ${r.r10!=null?Math.round(r.r10*100)+' %':'-'}</span></div>
       <div><b class="mono">${r.nps}</b><span>교량 위 PS · 노드 확보 ${Math.round((r.cov||0)*100)} %</span></div><div><b>${r.conf||'-'}${r.rv?' · 확인 필요':''}</b><span>신뢰도</span></div></div>
+      ${(r.unc||(r.gaps&&r.gaps.flag)||r.tmm)?`<p class="note" style="color:var(--warn)">불확실성 — ${[r.unc?'오차 범위가 등급 경계를 넘음':'', r.gaps&&r.gaps.flag?`자료 공백(사용 ${r.gaps.n_used}/${r.gaps.n_expected}장, 최장 공백 ${r.gaps.max_gap_days}일, 최근 영상 ${r.gaps.stale_days}일 전)`:'', r.tmm?`온도 보정 영향 ${r.tmm} mm (ERA5 기온 사용)`:''].filter(x=>x).join(' · ')}</p>`:''}
       <p class="note">허용 총침하 ${r.sa} mm · 허용 각변위 ${(r.ba*1000).toFixed(1)} ‰ (경간 ${r.sp} m 가정, ${r.typ}) · 사용 영상 ${r.q?r.q[1]+'/'+r.q[0]:'-'} · 기온 계수 ${r.kT??'-'} mm/°C${r.nt?' · '+r.nt:''}</p>`; }
   const tr=b.tracks||{}; if(Object.keys(tr).length) h+=`<table><tr><th>궤도</th><th>판정</th><th>교량 위 PS</th><th>비율</th></tr>${Object.entries(tr).map(([k,v])=>`<tr><td class="mono">${k}</td><td>${pill(st(v.level))}${v.proxy?' <span class="sub">교대부</span>':''}</td><td class="mono">${v.n_ps??'-'}</td><td class="mono">${v.r_now!=null?Math.round(v.r_now*100)+' %':'-'}</td></tr>`).join('')}</table>${b.agree===false?'<p class="note">궤도 간 판정이 다릅니다 — 현장 확인 권장.</p>':''}`;
   h+=`<h3 style="font-size:14px;margin:12px 0 4px">변위 시계열 (주변 지반 대비)</h3><div class="seg">${[['los','LOS'],['vert','수직'],['vert_tc','수직 (열 신축 보정)']].map(([k,n])=>`<button data-k="${k}" class="${k===kind?'on':''}">${n}</button>`).join('')}</div><div id="chart"></div>
